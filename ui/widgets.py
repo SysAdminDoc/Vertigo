@@ -23,6 +23,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from PyQt6 import sip
+
 from . import tokens
 from .mode_icons import ModeIcon
 from .theme import current_palette
@@ -229,41 +231,48 @@ class FadingTabWidget(QTabWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._fade_ms: int = tokens.M.base
-        self._current_fade: QPropertyAnimation | None = None
+        # One persistent effect + animation per page. Created lazily on
+        # first reveal and stored on the widget as a dynamic property so
+        # we never have to worry about stale closures or dangling pointers
+        # after a deleteLater. Tearing down the page takes the effect and
+        # animation with it via normal Qt parent ownership.
         self.currentChanged.connect(self._on_current_changed)
 
     def _on_current_changed(self, index: int) -> None:
+        if sip.isdeleted(self):
+            return
         widget = self.widget(index)
-        if widget is None:
+        if widget is None or sip.isdeleted(widget):
             return
         if _reduced_motion_requested():
             return
 
-        # Stop any in-flight fade so we don't stack effects across rapid
-        # tab flicks — users can drum through tabs with the keyboard and
-        # each switch should supersede the previous animation cleanly.
-        if self._current_fade is not None:
-            self._current_fade.stop()
-            self._current_fade = None
-
-        effect = QGraphicsOpacityEffect(widget)
+        effect, anim = self._ensure_fade_actors(widget)
+        anim.stop()
+        # Reset opacity for a clean fade-in every time the tab is shown.
+        effect.setEnabled(True)
         effect.setOpacity(0.0)
-        widget.setGraphicsEffect(effect)
+        anim.start()
 
-        anim = QPropertyAnimation(effect, b"opacity", self)
-        anim.setDuration(self._fade_ms)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+    def _ensure_fade_actors(self, widget: QWidget) -> tuple[QGraphicsOpacityEffect, QPropertyAnimation]:
+        """Lazily attach (and cache) the effect + animation on the page.
 
-        def _cleanup() -> None:
-            # Drop the graphics effect once the fade lands — leaving it in
-            # place would keep a per-widget compositor pass forever and
-            # dim scroll-bar hover feedback on some styles.
-            widget.setGraphicsEffect(None)
-            if self._current_fade is anim:
-                self._current_fade = None
-
-        anim.finished.connect(_cleanup)
-        self._current_fade = anim
-        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+        Cached on the widget via ``setProperty``-style private attrs so that
+        when the widget is destroyed, the effect and animation go with it.
+        Nothing outside the widget holds a reference, so there is no way
+        for the finished() signal to fire on a dead target.
+        """
+        effect: QGraphicsOpacityEffect | None = getattr(widget, "_vertigo_fade_effect", None)
+        anim: QPropertyAnimation | None = getattr(widget, "_vertigo_fade_anim", None)
+        if effect is None or sip.isdeleted(effect):
+            effect = QGraphicsOpacityEffect(widget)
+            widget.setGraphicsEffect(effect)
+            widget._vertigo_fade_effect = effect  # type: ignore[attr-defined]
+        if anim is None or sip.isdeleted(anim):
+            anim = QPropertyAnimation(effect, b"opacity", widget)
+            anim.setDuration(self._fade_ms)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            widget._vertigo_fade_anim = anim  # type: ignore[attr-defined]
+        return effect, anim
