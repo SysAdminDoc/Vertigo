@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
 from PyQt6.QtCore import (
+    QEasingCurve,
     QPropertyAnimation,
     QSize,
     QTimer,
@@ -10,14 +13,17 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtWidgets import (
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from . import tokens
 from .mode_icons import ModeIcon
 from .theme import current_palette
 
@@ -186,3 +192,78 @@ class Toast(QLabel):
 
     def refresh_theme(self) -> None:
         self._apply_style()
+
+
+def _reduced_motion_requested() -> bool:
+    """Honour the reduced-motion opt-out.
+
+    Qt has no first-class reduced-motion signal on Windows, so we fall back
+    to the environment variable the rest of the app already respects:
+    ``QT_ANIMATION_DURATION_FACTOR=0`` zeros out every Qt animation. If a
+    caller has explicitly set it to 0 (or 0.0), skip the fade entirely.
+    """
+    raw = os.environ.get("QT_ANIMATION_DURATION_FACTOR", "").strip()
+    if not raw:
+        return False
+    try:
+        return float(raw) == 0.0
+    except ValueError:
+        return False
+
+
+class FadingTabWidget(QTabWidget):
+    """QTabWidget subclass that cross-fades the incoming page on tab change.
+
+    Plain ``QTabWidget`` snaps between pages with no transition — the cut
+    reads as abrupt once every other surface in the app is styled. This
+    subclass hooks ``currentChanged`` and runs a short opacity ramp on the
+    new page so the switch reads as a soft dissolve instead of a cut.
+
+    The fade is non-invasive: the stylesheet is untouched, geometry is
+    unchanged, and tab order / focus behaviour is identical to the base
+    class. If the user has asked for reduced motion (via
+    ``QT_ANIMATION_DURATION_FACTOR=0``) the widget falls through to the
+    default QTabWidget behaviour without creating an effect or animation.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._fade_ms: int = tokens.M.base
+        self._current_fade: QPropertyAnimation | None = None
+        self.currentChanged.connect(self._on_current_changed)
+
+    def _on_current_changed(self, index: int) -> None:
+        widget = self.widget(index)
+        if widget is None:
+            return
+        if _reduced_motion_requested():
+            return
+
+        # Stop any in-flight fade so we don't stack effects across rapid
+        # tab flicks — users can drum through tabs with the keyboard and
+        # each switch should supersede the previous animation cleanly.
+        if self._current_fade is not None:
+            self._current_fade.stop()
+            self._current_fade = None
+
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.0)
+        widget.setGraphicsEffect(effect)
+
+        anim = QPropertyAnimation(effect, b"opacity", self)
+        anim.setDuration(self._fade_ms)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _cleanup() -> None:
+            # Drop the graphics effect once the fade lands — leaving it in
+            # place would keep a per-widget compositor pass forever and
+            # dim scroll-bar hover feedback on some styles.
+            widget.setGraphicsEffect(None)
+            if self._current_fade is anim:
+                self._current_fade = None
+
+        anim.finished.connect(_cleanup)
+        self._current_fade = anim
+        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
