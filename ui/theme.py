@@ -1070,16 +1070,16 @@ QHeaderView::section {{
 
 /* ------------------------------------------------------------- tabs */
 
-QTabWidget#sideTabs::pane {{
+QTabWidget::pane {{
     border: 1px solid {t.surface0};
     border-radius: 14px;
     background: {t.mantle};
     top: 0;
 }}
-QTabWidget#sideTabs QTabBar {{
+QTabWidget QTabBar {{
     qproperty-drawBase: 0;
 }}
-QTabWidget#sideTabs QTabBar::tab {{
+QTabBar::tab {{
     background: transparent;
     color: {t.overlay2};
     padding: 9px 12px;
@@ -1090,16 +1090,16 @@ QTabWidget#sideTabs QTabBar::tab {{
     font-weight: 600;
     letter-spacing: 0.2px;
 }}
-QTabWidget#sideTabs QTabBar::tab:hover {{
+QTabBar::tab:hover {{
     color: {t.subtext1};
     background: {t.accent_hover};
 }}
-QTabWidget#sideTabs QTabBar::tab:selected {{
+QTabBar::tab:selected {{
     color: {t.text};
     border-color: {t.surface1};
     background: {t.accent_muted};
 }}
-QTabWidget#sideTabs QTabBar::tab:focus {{
+QTabBar::tab:focus {{
     color: {t.text};
     border-color: {t.focus};
 }}
