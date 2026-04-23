@@ -18,25 +18,25 @@ class TitleBar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("titleBar")
-        self.setFixedHeight(42)
+        self.setFixedHeight(48)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         self._drag_pos: QPoint | None = None
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 0, 0, 0)
-        lay.setSpacing(14)
+        lay.setContentsMargins(16, 0, 0, 0)
+        lay.setSpacing(12)
 
         brand_wrap = QHBoxLayout()
         brand_wrap.setSpacing(10)
 
         mark = QLabel()
         mark.setObjectName("brandMark")
-        mark.setFixedSize(QSize(24, 24))
+        mark.setFixedSize(QSize(26, 26))
         pix = QPixmap(str(icon_path()))
         if not pix.isNull():
             mark.setPixmap(pix.scaled(
-                24, 24,
+                26, 26,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
@@ -50,11 +50,11 @@ class TitleBar(QWidget):
         brand_wrap.addWidget(brand)
         lay.addLayout(brand_wrap)
 
-        sep = QLabel("|")
+        sep = QLabel("\u2022")
         sep.setObjectName("titleSep")
         lay.addWidget(sep)
 
-        self._subtitle = QLabel("Vertical video forge")
+        self._subtitle = QLabel("Vertical video studio")
         self._subtitle.setObjectName("titleText")
         lay.addWidget(self._subtitle)
 
@@ -63,7 +63,7 @@ class TitleBar(QWidget):
         self._theme = QComboBox()
         self._theme.setObjectName("themePicker")
         self._theme.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._theme.setToolTip("Theme")
+        self._theme.setToolTip("Theme appearance")
         self._theme.setAccessibleName("Theme")
         self._theme.currentIndexChanged.connect(self._emit_theme)
         lay.addWidget(self._theme)

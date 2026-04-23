@@ -146,13 +146,13 @@ class QueueItem(QFrame):
         if self._selected:
             self.setStyleSheet(
                 f"QFrame#queueItem {{background: {theme.accent_selected}; "
-                f"border: 1px solid {theme.accent}; border-radius: 8px;}}"
+                f"border: 1px solid {theme.accent}; border-radius: 10px;}}"
             )
         else:
             self.setStyleSheet(
                 f"QFrame#queueItem {{background: {theme.base}; "
-                f"border: 1px solid {theme.surface0}; border-radius: 8px;}}"
-                f"QFrame#queueItem:hover {{border-color: {theme.surface2};}}"
+                f"border: 1px solid {theme.surface0}; border-radius: 10px;}}"
+                f"QFrame#queueItem:hover {{border-color: {theme.surface2}; background: {theme.accent_hover};}}"
                 f"QFrame#queueItem:focus {{border-color: {theme.focus};}}"
             )
 
@@ -190,13 +190,15 @@ class BatchQueue(QWidget):
         self._empty.setObjectName("emptyState")
         self._empty.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         empty_lay = QVBoxLayout(self._empty)
-        empty_lay.setContentsMargins(18, 18, 18, 18)
-        empty_lay.setSpacing(4)
+        empty_lay.setContentsMargins(24, 28, 24, 28)
+        empty_lay.setSpacing(6)
         empty_lay.addStretch(1)
-        empty_title = QLabel("Queue is empty")
+        empty_title = QLabel("Your queue is empty")
         empty_title.setObjectName("emptyTitle")
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_body = QLabel("Import clips from the preview area to build a batch.")
+        empty_body = QLabel(
+            "Drop several clips on the preview to batch-export them with one set of settings."
+        )
         empty_body.setObjectName("emptyBody")
         empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_body.setWordWrap(True)

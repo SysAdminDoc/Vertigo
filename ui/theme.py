@@ -286,10 +286,23 @@ def qcolor(hex_or_rgba: str) -> QColor:
 
 
 def build_stylesheet(preference: str | None = None) -> str:
+    """Compose Vertigo's QSS from theme tokens.
+
+    Conventions this stylesheet enforces:
+      - One radius scale: 6 (chip) / 10 (control) / 14 (panel) / 18 (hero)
+      - One spacing rhythm: multiples of 4 px
+      - One type scale:   11 caption / 12 small / 13 body / 15 title / 20 display
+      - Sentence-case labels (never SHOUTY CAPS on interactive elements);
+        UPPERCASE reserved for low-weight section headers with clear tracking
+      - Focus state is a coloured border that keeps the same 1 px width,
+        so there is no layout shift between resting → focused
+      - Backgrounds carry visual layering: base (resting) → mantle (elevated)
+        → surface0 (raised) → surface1 (pressed/hovered raised)
+    """
     t = THEMES[resolved_theme_id(preference)]
     return f"""
 * {{
-    font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+    font-family: "Segoe UI Variable Display", "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
     color: {t.text};
     selection-background-color: {t.accent};
     selection-color: {t.accent_text};
@@ -299,22 +312,24 @@ QMainWindow, QWidget#rootWidget {{
     background: {t.base};
 }}
 
+/* ------------------------------------------------------------- chrome */
+
 QWidget#titleBar {{
     background: {t.mantle};
     border-bottom: 1px solid {t.surface0};
 }}
 
 QLabel#titleText {{
-    color: {t.subtext1};
-    font-weight: 600;
-    letter-spacing: 0px;
+    color: {t.subtext0};
+    font-weight: 500;
+    font-size: 12px;
 }}
 
 QLabel#brand {{
-    color: {t.accent};
-    font-weight: 800;
-    letter-spacing: 0px;
-    font-size: 14px;
+    color: {t.text};
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.2px;
 }}
 
 QLabel#brandDot {{
@@ -323,7 +338,8 @@ QLabel#brandDot {{
 }}
 
 QLabel#titleSep {{
-    color: {t.surface2};
+    color: {t.surface1};
+    font-size: 12px;
 }}
 
 QPushButton#winCtl, QPushButton#winClose {{
@@ -332,9 +348,9 @@ QPushButton#winCtl, QPushButton#winClose {{
     border: none;
     min-width: 44px;
     min-height: 32px;
-    font-size: 14px;
+    font-size: 13px;
 }}
-QPushButton#winCtl:hover, QPushButton#winClose:hover {{
+QPushButton#winCtl:hover {{
     background: {t.surface0};
     color: {t.text};
 }}
@@ -343,44 +359,75 @@ QPushButton#winClose:hover {{
     color: {t.accent_text};
 }}
 QPushButton#winCtl:focus, QPushButton#winClose:focus {{
-    border: 1px solid {t.focus};
+    background: {t.surface0};
+    color: {t.text};
 }}
+
+QComboBox#themePicker {{
+    min-width: 108px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid transparent;
+    color: {t.subtext1};
+}}
+QComboBox#themePicker:hover {{
+    background: {t.surface0};
+    border-color: {t.surface0};
+    color: {t.text};
+}}
+QComboBox#themePicker:focus {{
+    border-color: {t.focus};
+}}
+
+/* ------------------------------------------------------------- surfaces */
 
 QWidget#glassPanel, QFrame#glassPanel {{
     background: {t.mantle};
     border: 1px solid {t.surface0};
-    border-radius: 8px;
+    border-radius: 14px;
 }}
 
 QWidget#heroPanel, QFrame#heroPanel {{
     background: {t.mantle};
-    border: 1px solid {t.surface1};
-    border-radius: 8px;
+    border: 1px solid {t.surface0};
+    border-radius: 18px;
 }}
 
+QWidget#emptyState {{
+    background: {t.base};
+    border: 1px dashed {t.surface1};
+    border-radius: 14px;
+}}
+
+/* ------------------------------------------------------------- type */
+
 QLabel#sectionTitle {{
-    color: {t.subtext1};
-    font-size: 11px;
+    color: {t.overlay2};
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0px;
+    letter-spacing: 1.4px;
     text-transform: uppercase;
 }}
 
 QLabel#bigTitle {{
     color: {t.text};
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
 }}
 
 QLabel#subtitle {{
     color: {t.subtext0};
     font-size: 12px;
-    line-height: 150%;
+    line-height: 140%;
 }}
 
 QLabel#valueMuted {{
     color: {t.overlay2};
     font-size: 11px;
+    font-weight: 500;
 }}
 
 QLabel#valueBright {{
@@ -390,52 +437,51 @@ QLabel#valueBright {{
 }}
 
 QLabel#formLabel {{
-    color: {t.subtext1};
+    color: {t.subtext0};
     font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.2px;
 }}
 
 QLabel#formValue {{
     color: {t.subtext1};
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
 }}
 
 QLabel#emptyTitle {{
     color: {t.text};
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.1px;
 }}
 
 QLabel#emptyBody {{
     color: {t.subtext0};
-    font-size: 11px;
-    line-height: 150%;
+    font-size: 12px;
+    line-height: 160%;
 }}
 
-QWidget#emptyState {{
-    background: {t.base};
-    border: 1px dashed {t.surface1};
-    border-radius: 8px;
-}}
+/* ------------------------------------------------------------- pills & notices */
 
 QLabel#statusPill {{
     background: {t.surface0};
     color: {t.subtext1};
-    border: 1px solid {t.surface1};
-    border-radius: 8px;
-    padding: 5px 9px;
+    border: 1px solid {t.surface0};
+    border-radius: 999px;
+    padding: 5px 12px;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
 }}
 
 QLabel#inlineNotice {{
     background: {t.base};
     color: {t.subtext0};
     border: 1px solid {t.surface0};
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 11px;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 150%;
 }}
 QLabel#inlineNotice[tone="warning"] {{
     color: {t.yellow};
@@ -448,40 +494,42 @@ QLabel#inlineNotice[tone="success"] {{
     background: {t.green_soft};
 }}
 
+/* ------------------------------------------------------------- buttons */
+
 QPushButton#primaryBtn {{
     background: {t.accent};
     color: {t.accent_text};
     border: 1px solid {t.accent};
-    border-radius: 8px;
-    padding: 11px 20px;
+    border-radius: 10px;
+    padding: 11px 22px;
     font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0px;
-    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.1px;
 }}
 QPushButton#primaryBtn:hover {{
     background: {t.accent_soft};
     border-color: {t.accent_soft};
 }}
 QPushButton#primaryBtn:pressed {{
-    background: {t.pink};
-    border-color: {t.pink};
+    background: {t.accent_soft};
+    border-color: {t.accent_soft};
+    padding-top: 12px;
+    padding-bottom: 10px;
 }}
 QPushButton#primaryBtn:focus {{
-    border: 2px solid {t.focus};
-    padding: 10px 19px;
+    border-color: {t.focus};
 }}
 QPushButton#primaryBtn:disabled {{
-    background: {t.surface1};
-    border-color: {t.surface1};
-    color: {t.overlay1};
+    background: {t.surface0};
+    border-color: {t.surface0};
+    color: {t.overlay0};
 }}
 
 QPushButton#ghostBtn {{
-    background: {t.base};
+    background: transparent;
     color: {t.subtext1};
     border: 1px solid {t.surface1};
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 9px 16px;
     font-size: 12px;
     font-weight: 600;
@@ -489,31 +537,53 @@ QPushButton#ghostBtn {{
 QPushButton#ghostBtn:hover {{
     border-color: {t.surface2};
     color: {t.text};
+    background: {t.accent_hover};
+}}
+QPushButton#ghostBtn:pressed {{
     background: {t.accent_muted};
 }}
 QPushButton#ghostBtn:focus {{
-    border: 2px solid {t.focus};
-    padding: 8px 15px;
+    border-color: {t.focus};
 }}
 QPushButton#ghostBtn:disabled {{
-    background: {t.mantle};
     border-color: {t.surface0};
     color: {t.overlay0};
 }}
+
+QPushButton#destructiveGhost {{
+    background: transparent;
+    color: {t.subtext1};
+    border: 1px solid {t.surface1};
+    border-radius: 10px;
+    padding: 9px 16px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton#destructiveGhost:hover {{
+    border-color: {t.red};
+    color: {t.red};
+    background: {t.red_soft};
+}}
+QPushButton#destructiveGhost:focus {{
+    border-color: {t.focus};
+}}
+
+/* ------------------------------------------------------------- mode cards */
 
 QPushButton#modeCard {{
     background: {t.base};
     color: {t.subtext1};
     border: 1px solid {t.surface0};
-    border-radius: 8px;
-    padding: 14px;
+    border-radius: 12px;
+    padding: 16px 18px;
     text-align: left;
     font-size: 13px;
     font-weight: 600;
 }}
 QPushButton#modeCard:hover {{
-    border-color: {t.accent};
-    background: {t.accent_muted};
+    border-color: {t.surface2};
+    background: {t.accent_hover};
+    color: {t.text};
 }}
 QPushButton#modeCard:checked {{
     border-color: {t.accent};
@@ -526,21 +596,25 @@ QPushButton#modeCard:disabled {{
     background: {t.mantle};
 }}
 QPushButton#modeCard:focus {{
-    border: 2px solid {t.focus};
+    border-color: {t.focus};
 }}
 
+/* ------------------------------------------------------------- chips */
+
 QPushButton#presetChip {{
-    background: {t.surface0};
+    background: transparent;
     color: {t.subtext1};
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 8px 12px;
+    border: 1px solid {t.surface1};
+    border-radius: 999px;
+    padding: 8px 14px;
     font-size: 12px;
     font-weight: 600;
+    letter-spacing: 0.1px;
 }}
 QPushButton#presetChip:hover {{
-    background: {t.surface1};
+    background: {t.accent_hover};
     color: {t.text};
+    border-color: {t.surface2};
 }}
 QPushButton#presetChip:checked {{
     background: {t.accent};
@@ -548,97 +622,111 @@ QPushButton#presetChip:checked {{
     border-color: {t.accent};
 }}
 QPushButton#presetChip:disabled {{
-    background: {t.surface0};
     color: {t.overlay1};
+    border-color: {t.surface0};
 }}
 QPushButton#presetChip:focus {{
-    border: 2px solid {t.focus};
-    padding: 7px 11px;
+    border-color: {t.focus};
 }}
+
+/* ------------------------------------------------------------- drop zone */
 
 QLabel#dropZone {{
     color: {t.subtext0};
-    border: 2px dashed {t.surface1};
-    border-radius: 8px;
-    padding: 28px;
+    border: 1px dashed {t.surface2};
+    border-radius: 14px;
+    padding: 32px;
     background: {t.base};
     font-size: 13px;
+    line-height: 160%;
 }}
 QLabel#dropZone[hover="true"] {{
     border-color: {t.accent};
     color: {t.text};
-    background: {t.accent_muted};
+    background: {t.accent_hover};
 }}
 QLabel#dropZone:focus {{
     border-color: {t.focus};
 }}
 
+/* ------------------------------------------------------------- sliders */
+
 QSlider::groove:horizontal {{
-    height: 5px;
+    height: 4px;
     background: {t.surface0};
-    border-radius: 3px;
+    border-radius: 2px;
 }}
 QSlider::sub-page:horizontal {{
     background: {t.accent};
-    border-radius: 3px;
+    border-radius: 2px;
 }}
 QSlider::handle:horizontal {{
-    background: {t.text};
-    border: 2px solid {t.accent};
-    width: 16px;
-    height: 16px;
+    background: {t.accent};
+    border: 2px solid {t.mantle};
+    width: 14px;
+    height: 14px;
     margin: -6px 0;
-    border-radius: 8px;
+    border-radius: 9px;
 }}
 QSlider::handle:horizontal:hover {{
-    background: {t.accent};
+    background: {t.accent_soft};
+}}
+QSlider::handle:horizontal:pressed {{
+    background: {t.accent_soft};
+    border-color: {t.focus};
 }}
 QSlider:focus {{
-    border: 1px solid {t.focus};
-    border-radius: 8px;
 }}
+QSlider:focus::handle:horizontal {{
+    border-color: {t.focus};
+}}
+
+/* ------------------------------------------------------------- progress */
 
 QProgressBar {{
     background: {t.surface0};
     border: none;
-    border-radius: 5px;
-    height: 10px;
+    border-radius: 4px;
+    height: 6px;
     text-align: center;
-    color: {t.text};
-    font-size: 11px;
+    color: {t.subtext0};
+    font-size: 10px;
     font-weight: 600;
+    letter-spacing: 0.3px;
 }}
 QProgressBar::chunk {{
-    background: qlineargradient(
-        x1:0, y1:0, x2:1, y2:0,
-        stop:0 {t.accent},
-        stop:1 {t.pink}
-    );
-    border-radius: 5px;
+    background: {t.accent};
+    border-radius: 4px;
 }}
+
+/* ------------------------------------------------------------- log */
 
 QTextEdit#logPanel {{
     background: {t.crust};
     border: 1px solid {t.surface0};
-    border-radius: 8px;
+    border-radius: 10px;
     color: {t.subtext0};
-    font-family: "Cascadia Code", "Consolas", "Fira Code", monospace;
+    font-family: "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
     font-size: 11px;
-    padding: 8px;
+    padding: 10px 12px;
+    selection-background-color: {t.accent_selected};
+    selection-color: {t.text};
 }}
+
+/* ------------------------------------------------------------- scrollbars */
 
 QScrollBar:vertical {{
     background: transparent;
-    width: 10px;
-    margin: 0;
+    width: 8px;
+    margin: 2px 0;
 }}
 QScrollBar::handle:vertical {{
-    background: {t.surface2};
-    border-radius: 5px;
-    min-height: 24px;
+    background: {t.surface1};
+    border-radius: 4px;
+    min-height: 32px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background: {t.accent};
+    background: {t.surface2};
 }}
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical,
@@ -649,90 +737,117 @@ QScrollBar::sub-page:vertical {{
 }}
 QScrollBar:horizontal {{
     background: transparent;
-    height: 10px;
+    height: 8px;
+    margin: 0 2px;
 }}
 QScrollBar::handle:horizontal {{
-    background: {t.surface2};
-    border-radius: 5px;
-    min-width: 24px;
+    background: {t.surface1};
+    border-radius: 4px;
+    min-width: 32px;
 }}
 QScrollBar::handle:horizontal:hover {{
-    background: {t.accent};
+    background: {t.surface2};
 }}
+
+/* ------------------------------------------------------------- tooltip */
 
 QToolTip {{
-    background: {t.surface0};
+    background: {t.crust};
     color: {t.text};
-    border: 1px solid {t.surface2};
+    border: 1px solid {t.surface1};
     padding: 6px 10px;
-    border-radius: 6px;
+    border-radius: 8px;
+    font-size: 11px;
 }}
 
+/* ------------------------------------------------------------- combobox */
+
 QComboBox {{
-    background: {t.surface0};
+    background: {t.crust};
     border: 1px solid {t.surface1};
-    border-radius: 8px;
-    padding: 6px 12px;
+    border-radius: 10px;
+    padding: 7px 12px;
     color: {t.text};
+    font-size: 12px;
+    font-weight: 500;
+    selection-background-color: {t.accent};
+    selection-color: {t.accent_text};
 }}
 QComboBox:hover {{
-    border-color: {t.accent};
+    border-color: {t.surface2};
 }}
 QComboBox:focus {{
-    border: 2px solid {t.focus};
+    border-color: {t.focus};
 }}
 QComboBox:disabled {{
     color: {t.overlay1};
     background: {t.mantle};
     border-color: {t.surface0};
 }}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
 QComboBox QAbstractItemView {{
     background: {t.mantle};
     color: {t.text};
     border: 1px solid {t.surface1};
-    selection-background-color: {t.accent};
-    selection-color: {t.accent_text};
+    border-radius: 10px;
+    padding: 4px;
+    selection-background-color: {t.accent_selected};
+    selection-color: {t.text};
     outline: none;
 }}
-QComboBox#themePicker {{
-    min-width: 112px;
-    padding: 5px 10px;
-    font-size: 11px;
-    font-weight: 600;
-}}
+
+/* ------------------------------------------------------------- inputs */
 
 QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {{
     background: {t.crust};
     color: {t.text};
     border: 1px solid {t.surface1};
-    border-radius: 8px;
-    padding: 7px 10px;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
     selection-background-color: {t.accent};
     selection-color: {t.accent_text};
 }}
+QLineEdit:hover, QPlainTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
+    border-color: {t.surface2};
+}}
 QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-    border: 2px solid {t.focus};
+    border-color: {t.focus};
+    background: {t.mantle};
 }}
 QLineEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     background: {t.mantle};
     border-color: {t.surface0};
     color: {t.overlay1};
 }}
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    width: 16px;
+    border: none;
+    background: transparent;
+}}
+
+/* ------------------------------------------------------------- lists */
 
 QListView, QTreeView, QTableView {{
     background: {t.crust};
     color: {t.text};
     border: 1px solid {t.surface0};
-    border-radius: 8px;
+    border-radius: 10px;
+    padding: 4px;
     selection-background-color: {t.accent_selected};
     selection-color: {t.text};
-    alternate-background-color: {t.surface0};
+    alternate-background-color: {t.base};
 }}
 QListView::item, QTreeView::item, QTableView::item {{
-    padding: 5px 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
 }}
 QListView::item:hover, QTreeView::item:hover, QTableView::item:hover {{
-    background: {t.accent_muted};
+    background: {t.accent_hover};
 }}
 QListView::item:selected, QTreeView::item:selected, QTableView::item:selected {{
     background: {t.accent_selected};
@@ -743,71 +858,124 @@ QHeaderView::section {{
     color: {t.subtext1};
     border: none;
     border-right: 1px solid {t.surface1};
-    padding: 6px 8px;
-    font-weight: 700;
+    padding: 8px 10px;
+    font-weight: 600;
+    font-size: 11px;
 }}
+
+/* ------------------------------------------------------------- tabs */
 
 QTabWidget#sideTabs::pane {{
     border: 1px solid {t.surface0};
-    border-radius: 8px;
+    border-radius: 14px;
     background: {t.mantle};
+    top: -1px;
+}}
+QTabWidget#sideTabs QTabBar {{
+    qproperty-drawBase: 0;
 }}
 QTabWidget#sideTabs QTabBar::tab {{
     background: transparent;
-    color: {t.subtext0};
-    padding: 9px 14px;
+    color: {t.overlay2};
+    padding: 10px 14px;
+    margin-right: 2px;
     border: none;
     font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}}
+QTabWidget#sideTabs QTabBar::tab:hover {{
+    color: {t.subtext1};
 }}
 QTabWidget#sideTabs QTabBar::tab:selected {{
     color: {t.text};
     border-bottom: 2px solid {t.accent};
 }}
-QTabWidget#sideTabs QTabBar::tab:hover {{
+QTabWidget#sideTabs QTabBar::tab:focus {{
     color: {t.text};
 }}
+
+/* ------------------------------------------------------------- splitter */
 
 QSplitter::handle {{
     background: {t.base};
 }}
 QSplitter::handle:horizontal {{
-    width: 2px;
+    width: 6px;
+    margin: 0 2px;
+    border-radius: 3px;
 }}
 QSplitter::handle:hover {{
+    background: {t.surface0};
+}}
+QSplitter::handle:pressed {{
     background: {t.surface1};
 }}
 
-QMessageBox {{
-    background: {t.mantle};
-}}
-QMessageBox QLabel {{
-    color: {t.text};
-}}
-QDialog, QFileDialog {{
+/* ------------------------------------------------------------- dialogs */
+
+QMessageBox, QDialog, QFileDialog {{
     background: {t.mantle};
     color: {t.text};
 }}
-QDialog QLabel, QFileDialog QLabel {{
+QMessageBox QLabel, QDialog QLabel, QFileDialog QLabel {{
     color: {t.text};
 }}
 QMessageBox QPushButton, QDialog QPushButton, QFileDialog QPushButton {{
-    background: {t.base};
+    background: transparent;
     color: {t.subtext1};
     border: 1px solid {t.surface1};
-    border-radius: 8px;
-    padding: 8px 14px;
-    min-width: 78px;
+    border-radius: 10px;
+    padding: 8px 16px;
+    min-width: 82px;
+    font-size: 12px;
     font-weight: 600;
 }}
 QMessageBox QPushButton:hover, QDialog QPushButton:hover, QFileDialog QPushButton:hover {{
     border-color: {t.surface2};
     color: {t.text};
-    background: {t.accent_muted};
+    background: {t.accent_hover};
+}}
+QMessageBox QPushButton:default, QDialog QPushButton:default, QFileDialog QPushButton:default {{
+    background: {t.accent};
+    border-color: {t.accent};
+    color: {t.accent_text};
+}}
+QMessageBox QPushButton:default:hover, QDialog QPushButton:default:hover, QFileDialog QPushButton:default:hover {{
+    background: {t.accent_soft};
+    border-color: {t.accent_soft};
 }}
 QMessageBox QPushButton:focus, QDialog QPushButton:focus, QFileDialog QPushButton:focus {{
-    border: 2px solid {t.focus};
+    border-color: {t.focus};
+}}
+
+/* ------------------------------------------------------------- checkbox */
+
+QCheckBox {{
+    color: {t.subtext1};
+    font-size: 12px;
+    spacing: 8px;
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border-radius: 5px;
+    border: 1px solid {t.surface2};
+    background: {t.crust};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {t.accent};
+}}
+QCheckBox::indicator:checked {{
+    background: {t.accent};
+    border-color: {t.accent};
+    image: none;
+}}
+QCheckBox:focus {{
+    color: {t.text};
+}}
+QCheckBox::indicator:focus {{
+    border-color: {t.focus};
 }}
 """
 

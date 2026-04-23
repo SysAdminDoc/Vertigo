@@ -85,24 +85,41 @@ class PreviewCanvas(QWidget):
         p.fillRect(self.rect(), QColor(theme.crust))
 
         if self._frame is None:
-            p.setPen(QColor(theme.subtext1))
-            title_font = QFont()
-            title_font.setPointSize(14)
-            title_font.setWeight(QFont.Weight.DemiBold)
-            p.setFont(title_font)
-            p.drawText(
-                self.rect().adjusted(0, -16, 0, -16),
-                Qt.AlignmentFlag.AlignCenter,
-                "Import a source clip",
-            )
+            # Empty-state composition: muted 9:16 frame + aspect badge +
+            # single-line helper. Visual language matches the drop zone.
+            cx = self.rect().center().x()
+            cy = self.rect().center().y()
+            glyph_h = min(120.0, self.rect().height() * 0.48)
+            glyph_w = glyph_h * 9.0 / 16.0
+
+            frame_rect = QRectF(cx - glyph_w / 2, cy - glyph_h / 2 - 6,
+                                glyph_w, glyph_h)
+            frame_pen = QPen(qcolor(theme.surface2))
+            frame_pen.setWidthF(1.4)
+            p.setPen(frame_pen)
+            p.setBrush(qcolor(theme.mantle))
+            p.drawRoundedRect(frame_rect, 8, 8)
+
+            # Aspect ratio badge inside the frame
+            badge_font = QFont()
+            badge_font.setPointSize(10)
+            badge_font.setWeight(QFont.Weight.DemiBold)
+            badge_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)
+            p.setFont(badge_font)
             p.setPen(QColor(theme.overlay1))
-            body_font = QFont()
-            body_font.setPointSize(10)
-            p.setFont(body_font)
+            p.drawText(frame_rect, Qt.AlignmentFlag.AlignCenter, "9 : 16")
+
+            # Helper text below the frame
+            helper_font = QFont()
+            helper_font.setPointSize(11)
+            helper_font.setWeight(QFont.Weight.Medium)
+            p.setFont(helper_font)
+            p.setPen(QColor(theme.subtext0))
             p.drawText(
-                self.rect().adjusted(0, 18, 0, 18),
-                Qt.AlignmentFlag.AlignCenter,
-                "The crop preview and trim timeline will appear here.",
+                QRectF(0, frame_rect.bottom() + 16,
+                       self.rect().width(), 20),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                "Preview ready once a clip is loaded",
             )
             p.end()
             return

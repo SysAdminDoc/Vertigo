@@ -2,6 +2,64 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.7.0] - 2026-04-23
+
+### Premium polish pass
+
+Deep UI/UX refinement across the whole surface — no feature additions, every change measured against the question "would this pass review from a world-class design team?"
+
+### Added
+- **`ui/tokens.py`** — single source of truth for design tokens. Five scales: `S` (spacing, 4 px rhythm), `R` (radius — chip/control/panel/hero), `T` (type size — 11/12/13/15/20/28), `W` (weight — 400/500/600/700), `M` (motion — 120/180/280/360 ms). Code should reference tokens by name instead of hard-coding numbers.
+
+### Changed — design system
+- **Typography ladder** — real scale replacing the previous three-size-everything. Display (20 px, -0.2 letter-spacing), Title (15), Subtitle (14), Body (13), Body-S (12), Caption (11). Weights standardised on 500 for secondary UI and 600 for emphasis; 700 reserved for section headers.
+- **Radius system** — 6 (chip) / 10 (control) / 14 (panel) / 18 (hero) instead of uniform 8. Visual depth comes from the radius difference between hero / supporting panels / chips / buttons.
+- **Spacing rhythm** — every margin and padding swept onto a 4 px grid. No more 7/9/11/14/18/28 arbitrariness.
+- **Focus ring** — now a single 1 px coloured border instead of a `1 → 2 px` swap that caused layout shift. Buttons, inputs, sliders, tabs, and mode cards all pick up the same `focus` token.
+- **Primary button** — dropped `text-transform: uppercase` (dated/shouty), switched to sentence case with tight tracking. Press state uses a 1 px vertical text offset instead of a colour change to communicate depth. Disabled state merges into the surface layer.
+- **Progress bar** — removed the `accent → pink` linear gradient (read as Material-lite circa 2015). Now a solid accent fill at 6 px height. Idle state shows a muted "Ready" pill instead of the bar dominating the panel.
+- **Sidebar tabs** — 10 × 14 px padding, 2 px `margin-right` between tabs, resting colour drops to `overlay2` so the active tab really feels selected.
+- **Preset chips** — now true pills (999 px radius), transparent at rest with a 1 px border. Hover uses `accent_hover`; selected fills with `accent`. Feels like pills instead of pressed buttons.
+- **Checkbox** — previously unstyled; now a 16 × 16 rounded square that fills with accent on check, with a hover ring and focus ring.
+- **Splitter handle** — 10 px wide with subtle hover colour for discoverability (was a 2 px bar that was almost invisible).
+- **Scrollbars** — narrower (8 px) with 4 px radius thumbs. Less visual weight, still clickable.
+- **Tooltip** — repainted with crust background, surface1 border, 8 px radius. Reads as a separate surface instead of blending into the host.
+- **Dialogs (`QMessageBox`, `QFileDialog`)** — now themed consistently; default buttons pick up the primary colour. The native Windows dialog opt-out stays, so they stay in-app.
+
+### Changed — states and feedback
+- **Empty queue** — headline "Your queue is empty", body "Drop several clips on the preview to batch-export them with one set of settings." Reads as a hint instead of an error.
+- **Drop zone** — replaced the QLabel text composition with a painted empty state: inset rounded container, downward arrow entering a 9:16 phone frame glyph, headline, helper, and a muted format caption at the bottom. Hover state swaps the helper for accepted-format list and swaps the headline to "Release to add clips". Visual language now matches the preview canvas empty state.
+- **Preview canvas empty state** — two-line instructional text replaced with a muted 9:16 frame glyph carrying a "9 : 16" aspect badge and a single-line "Preview ready once a clip is loaded" helper.
+- **Progress panel at rest** — log textarea hides itself until an export starts; idle state is just "Export · Ready" with a flat bar. When encoding begins, the log slides in. When the export finishes, the destination row + "Reveal in folder" appears.
+- **Track tab** — copy warmed: "Load a clip to find faces and scene cuts" / "Scanning for faces and scene cuts…" / "Tracking 42 keyframes across 3 scenes. Export will follow the subject." Button: "Find subjects" → "Finding subjects…" while running → "Run again" once complete. The clinical "Analyze subject" verb is gone.
+- **Cancel button** — promoted from a generic ghost to a new `destructiveGhost` style that leans red on hover, so an in-flight cancel feels deliberate.
+- **Preset detail** — previously a single dense line; now two lines: geometry + bitrate on line 1, duration policy on line 2.
+
+### Changed — microcopy
+- Hero meta pill: "No clip loaded" → "Waiting for a clip".
+- Toast: "Could not read clip" → "Could not read that clip — {err}".
+- Scene status: "3 scene(s) detected" → "3 scenes detected · panning will respect cuts".
+- Titlebar separator glyph: ASCII pipe `|` → bullet `•`.
+
+### Changed — chrome
+- Titlebar height 42 → 48 px; brand label 14 → 15 px and `weight 800 → 700` for less shoutiness; icon 24 → 26 px. Theme picker is now a transparent combobox that lights up on hover instead of always drawing a border.
+- Body margins 18/16 → 20/20 for consistent breathing room.
+- Sidebar spacing 14 → 12 px; splitter handle now large enough to grab.
+
+### Accessibility
+- Every interactive control has an accessible focus state that does not shift layout.
+- Queue items are now focusable and respond to Enter/Space/Delete/Backspace.
+- Checkbox and combobox focus rings use the dedicated `focus` token, not the generic `accent`.
+- Mode cards and preset chips are accessible buttons with tooltip + accessible description.
+
+### Files touched
+`ui/tokens.py` (new), `ui/theme.py`, `ui/main_window.py`, `ui/titlebar.py`, `ui/file_drop.py` (rewritten from `QLabel` to painted `QWidget`), `ui/video_player.py` (empty-state composition), `ui/batch_queue.py`, `vertigo.py`, `vertigo.spec`, `README.md`.
+
+### Verified
+- All three themes (Mocha / Graphite / Latte) construct cleanly; main window renders at 1400 × 900 with proper hierarchy visible in offscreen-grab sanity checks.
+- Source-mode smoke-import (`python -c "from vertigo import __version__"`) reports 0.7.0.
+- No references to retired objectNames or removed widgets.
+
 ## [0.6.1] - 2026-04-23
 
 ### Fixed
