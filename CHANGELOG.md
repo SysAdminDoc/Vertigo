@@ -1,6 +1,21 @@
 # Changelog
 
-All notable changes to ReelForge are documented here.
+All notable changes to Kiln are documented here.
+
+## [0.5.0] - 2026-04-22
+
+### Changed
+- **Renamed the project from ReelForge to Kiln.** The brand shifts from a generic "forge" metaphor to the sharper image of a kiln: a focused chamber where raw clay becomes a finished, premium object. One syllable, more distinctive in the creator-tools space, pairs naturally with the existing mauve-gradient vertical chamber icon.
+- Entry point is now `python kiln.py` (was `python reelforge.py`). PyInstaller output binaries are `Kiln.exe` / `Kiln.app` / `Kiln`.
+- `QSettings` organization key moved to `Kiln` with a one-time fallback read from the old `ReelForge` key so existing users keep their theme preference.
+- Qt app property keys renamed (`reelforgeThemeId` → `kilnThemeId`, same for `reelforgeThemePreference`).
+- README, CHANGELOG, architecture tree, logo prompts, wordmark SVG, and all user-visible strings updated to the new name. Titlebar brand label reads **Kiln**; subtitle reads "The kiln for vertical video."
+- Cache / sidecar paths renamed (`.reelforge/` → `.kiln/`, `*.reelforge.srt` → `*.kiln.srt`).
+
+### Verified
+- App boots under every theme with the new brand mark, 6 sidebar tabs intact.
+- End-to-end encode (NVENC + Center + adjustments + 2 overlays) still produces a clean MP4.
+- No stale "ReelForge" / "reelforge" references remain in source or docs.
 
 ## [0.4.0] - 2026-04-22
 

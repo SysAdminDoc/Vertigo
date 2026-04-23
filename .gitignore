@@ -42,13 +42,13 @@ desktop.ini
 # PyInstaller
 *.manifest
 *.spec
-!reelforge.spec
+!kiln.spec
 
 # Logs & cache
 *.log
 .cache/
-.reelforge/
-reelforge_cache/
+.kiln/
+kiln_cache/
 
 # AI working files — local only, never commit
 CLAUDE.md

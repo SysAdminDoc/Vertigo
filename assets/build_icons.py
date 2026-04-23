@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the ReelForge brand mark to raster variants.
+"""Render the Kiln brand mark to raster variants.
 
 Run from the project root:
 

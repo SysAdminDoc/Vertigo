@@ -1,4 +1,4 @@
-"""Theme token coverage for ReelForge's PyQt theme system."""
+"""Theme token coverage for Kiln's PyQt theme system."""
 
 from __future__ import annotations
 

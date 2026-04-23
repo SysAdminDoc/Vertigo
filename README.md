@@ -1,17 +1,17 @@
 <div align="center">
 
-<img src="assets/icon.png" alt="ReelForge" width="140"/>
+<img src="assets/icon.png" alt="Kiln" width="140"/>
 
-# ReelForge
+# Kiln
 
-**Premium vertical-video forge for YouTube Shorts, TikTok & Instagram Reels.**
+**A premium kiln for short-form vertical video.**
 
-![version](https://img.shields.io/badge/version-0.4.0-cba6f7?style=for-the-badge)
+![version](https://img.shields.io/badge/version-0.5.0-cba6f7?style=for-the-badge)
 ![license](https://img.shields.io/badge/license-MIT-a6e3a1?style=for-the-badge)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-89b4fa?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.10%2B-f9e2af?style=for-the-badge)
 
-Drop any horizontal video. Get a polished 9:16 vertical with AI-tracked framing.
+Fire raw footage into polished 9:16 for YouTube Shorts, TikTok, and Instagram Reels.
 
 </div>
 
@@ -19,14 +19,14 @@ Drop any horizontal video. Get a polished 9:16 vertical with AI-tracked framing.
 
 ## Features
 
-- **Premium PyQt6 UI** — polished System / Mocha / Graphite / Latte themes, frameless custom titlebar, calm editor surfaces, refined focus states, accessible controls, and polished feedback.
+- **Premium PyQt6 UI** — polished System / Mocha / Graphite / Latte themes, frameless custom titlebar, calm editor surfaces, refined focus states, accessible controls.
 - **Four reframe modes:**
   - **Center Crop** — static center column, zero analysis.
-  - **Smart Track** — MediaPipe face detection; viewport pans to follow subjects over time with smoothed, *scene-aware* keyframes that never cross a hard cut.
-  - **Blur Letterbox** — full source frame on a softly blurred, zoomed backdrop.
+  - **Smart Track** — MediaPipe face detection; viewport pans to follow subjects with smoothed, *scene-aware* keyframes that never cross a hard cut.
+  - **Blur Letterbox** — full source frame on a softly blurred backdrop.
   - **Manual** — drag the viewport on the live preview to lock any column.
 - **Platform presets** — YouTube Shorts, TikTok, Instagram Reels, Square (1:1). One click switches output geometry and encoder target bitrate.
-- **Batch queue** — drop many clips at once, preview any one, then **Export All** to a folder. Per-item status indicator (pending / active / done / failed).
+- **Batch queue** — drop many clips at once, preview any one, then **Export All** to a folder. Per-item status indicator.
 - **Trim timeline** — dual-thumb in/out range slider directly on the preview. Exports respect the trim window via FFmpeg `-ss` / `-t`.
 - **Adjustments panel** — live brightness / contrast / saturation sliders; applied via FFmpeg `eq=` filter appended to the reframe chain.
 - **Scene detection** — PySceneDetect (with a histogram-delta fallback) segments the timeline to stabilize Smart Track.
@@ -36,17 +36,17 @@ Drop any horizontal video. Get a polished 9:16 vertical with AI-tracked framing.
 - **Live crop viewport** overlaid on the preview player so you see the target frame before rendering.
 - **Async FFmpeg encoding** with real-time progress bar and a scrolling log panel.
 - **Turnkey bootstrap** — single-command launch, auto-installs missing Python deps on first run.
-- **Binary builds** — `pyinstaller --clean reelforge.spec` produces single-file Windows, macOS `.app`, and Linux exes. GitHub Actions workflow builds all three on every tag push (or `workflow_dispatch`) and uploads to a draft release via `gh release upload --clobber`.
+- **Binary builds** — `pyinstaller --clean kiln.spec` produces single-file Windows, macOS `.app`, and Linux exes. GitHub Actions workflow builds all three on every tag push (or `workflow_dispatch`) and uploads to a draft release via `gh release upload --clobber`.
 
 ## Install
 
 ```bash
-git clone https://github.com/SysAdminDoc/ReelForge.git
-cd ReelForge
-python reelforge.py
+git clone https://github.com/SysAdminDoc/Kiln.git
+cd Kiln
+python kiln.py
 ```
 
-First run bootstraps PyQt6, OpenCV, NumPy, Pillow, MediaPipe, and `ffmpeg-python`. You must also have **FFmpeg** on `PATH`:
+First run bootstraps PyQt6, OpenCV, NumPy, Pillow, MediaPipe, and PySceneDetect. You must also have **FFmpeg** on `PATH`:
 
 ```bash
 # Windows
@@ -59,7 +59,7 @@ sudo apt install ffmpeg
 
 ## Use
 
-1. Launch `python reelforge.py`.
+1. Launch `python kiln.py`.
 2. Drop a video on the preview area (or click to browse).
 3. Pick a platform preset (Shorts / TikTok / Reels / Square).
 4. Pick a reframe mode. For Smart Track, MediaPipe scans the clip and returns tracking keyframes.
@@ -68,8 +68,8 @@ sudo apt install ffmpeg
 ## Architecture
 
 ```
-reelforge.py              entry + dependency bootstrap
-reelforge.spec            PyInstaller build spec (single-file, per-OS icon)
+kiln.py                   entry + dependency bootstrap
+kiln.spec                 PyInstaller build spec (single-file, per-OS icon)
 .github/workflows/build.yml  Multi-OS CI + GitHub Release upload
 core/
   probe.py                ffprobe wrapper (VideoInfo dataclass)
@@ -110,19 +110,19 @@ assets/
 
 | Mode | FFmpeg summary | When to use |
 | --- | --- | --- |
-| Center | `crop,scale` static | Subject always centered |
+| Center | `crop,scale` static | Subject already centered |
 | Smart Track | `crop=...:x=<piecewise lerp>,scale` | Talking heads, walking subjects |
 | Blur Letterbox | `split, blur+crop bg, scale fg, overlay` | Preserve full frame, no loss |
-| Manual | `crop` with locked offset | You want total control |
+| Manual | `crop` with locked offset | Total creative control |
 
 ## Build binaries
 
 ```bash
 pip install pyinstaller
-pyinstaller --clean reelforge.spec
-# dist/ReelForge.exe  (Windows)
-# dist/ReelForge.app  (macOS)
-# dist/ReelForge      (Linux)
+pyinstaller --clean kiln.spec
+# dist/Kiln.exe   (Windows)
+# dist/Kiln.app   (macOS)
+# dist/Kiln       (Linux)
 ```
 
 Or push a tag and let CI build all three — see `.github/workflows/build.yml`. A `workflow_dispatch` run with a tag input lands three artifacts on a draft release.

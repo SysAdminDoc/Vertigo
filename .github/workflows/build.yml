@@ -23,16 +23,16 @@ jobs:
         include:
           - os: windows-latest
             os-label: Windows x64
-            artifact-name: ReelForge-windows-x64.zip
-            exe: dist/ReelForge.exe
+            artifact-name: Kiln-windows-x64.zip
+            exe: dist/Kiln.exe
           - os: macos-14
             os-label: macOS arm64
-            artifact-name: ReelForge-macos-arm64.zip
-            exe: dist/ReelForge.app
+            artifact-name: Kiln-macos-arm64.zip
+            exe: dist/Kiln.app
           - os: ubuntu-latest
             os-label: Linux x64
-            artifact-name: ReelForge-linux-x64.tar.gz
-            exe: dist/ReelForge
+            artifact-name: Kiln-linux-x64.tar.gz
+            exe: dist/Kiln
 
     runs-on: ${{ matrix.os }}
 
@@ -73,32 +73,32 @@ jobs:
           python -c "import sys; sys.path.insert(0, '.'); from core.probe import probe; from core.presets import PRESETS; from core.reframe import build_plan, ReframeMode; from core.encode import EncodeJob; print('core OK')"
 
       - name: Build with PyInstaller
-        run: pyinstaller --clean reelforge.spec
+        run: pyinstaller --clean kiln.spec
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           cd dist
-          7z a -tzip ../ReelForge-windows-x64.zip ReelForge.exe
+          7z a -tzip ../Kiln-windows-x64.zip Kiln.exe
           cd ..
-          ls -la ReelForge-windows-x64.zip
+          ls -la Kiln-windows-x64.zip
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent ReelForge.app ../ReelForge-macos-arm64.zip
+          ditto -c -k --sequesterRsrc --keepParent Kiln.app ../Kiln-macos-arm64.zip
           cd ..
-          ls -la ReelForge-macos-arm64.zip
+          ls -la Kiln-macos-arm64.zip
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
           cd dist
-          tar -czf ../ReelForge-linux-x64.tar.gz ReelForge
+          tar -czf ../Kiln-linux-x64.tar.gz Kiln
           cd ..
-          ls -la ReelForge-linux-x64.tar.gz
+          ls -la Kiln-linux-x64.tar.gz
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

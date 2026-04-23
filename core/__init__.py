@@ -1,4 +1,4 @@
-"""ReelForge core — reframing, detection, encoding."""
+"""Kiln core — reframing, detection, encoding."""
 
 from .presets import PRESETS, Preset
 from .probe import VideoInfo, probe

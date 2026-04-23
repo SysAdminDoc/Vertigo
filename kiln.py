@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""ReelForge v0.4.0 — premium vertical-video forge for Shorts / TikTok / Reels.
+"""Kiln v0.5.0 — a premium kiln for short-form vertical video.
+
+Takes raw footage of any shape and fires it into polished 9:16 for
+YouTube Shorts, TikTok, and Instagram Reels.
 
 Turnkey entry: bootstraps dependencies on first run, then launches the GUI.
 """
@@ -12,8 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-__version__ = "0.4.0"
-APP_NAME = "ReelForge"
+__version__ = "0.5.0"
+APP_NAME = "Kiln"
 
 _REQUIRED = [
     ("PyQt6",        "PyQt6>=6.7.0"),
@@ -102,9 +105,12 @@ def main() -> int:
     if not icon.isNull():
         app.setWindowIcon(icon)
 
-    theme_pref = sanitize_theme_preference(
-        QSettings("ReelForge", "ReelForge").value("theme", "system", type=str)
-    )
+    settings = QSettings("Kiln", "Kiln")
+    legacy = QSettings("ReelForge", "ReelForge")
+    saved = settings.value("theme", None)
+    if saved is None:
+        saved = legacy.value("theme", "system", type=str)
+    theme_pref = sanitize_theme_preference(saved)
     apply_app_theme(app, theme_pref)
 
     win = MainWindow()

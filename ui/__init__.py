@@ -1,1 +1,1 @@
-"""ReelForge UI — premium PyQt6 widgets (Catppuccin Mocha)."""
+"""Kiln UI — premium PyQt6 widgets + multi-theme palette."""

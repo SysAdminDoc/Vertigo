@@ -1,9 +1,9 @@
-# PyInstaller spec — ReelForge single-file build.
+# PyInstaller spec — Kiln single-file build.
 # Build:
-#   pyinstaller --clean reelforge.spec
+#   pyinstaller --clean kiln.spec
 # Output:
-#   dist/ReelForge.exe          (Windows)
-#   dist/ReelForge / ReelForge  (macOS + Linux)
+#   dist/Kiln.exe          (Windows)
+#   dist/Kiln / Kiln.app   (Linux / macOS)
 
 # -*- mode: python ; coding: utf-8 -*-
 
@@ -70,7 +70,7 @@ excludes = [
 
 
 a = Analysis(
-    ["reelforge.py"],
+    ["kiln.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
@@ -94,7 +94,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="ReelForge",
+    name="Kiln",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -114,12 +114,12 @@ exe = EXE(
 if sys.platform == "darwin":
     app = BUNDLE(
         exe,
-        name="ReelForge.app",
+        name="Kiln.app",
         icon=icon_file,
-        bundle_identifier="com.sysadmindoc.reelforge",
+        bundle_identifier="com.sysadmindoc.kiln",
         info_plist={
-            "CFBundleShortVersionString": "0.4.0",
-            "CFBundleVersion": "0.4.0",
+            "CFBundleShortVersionString": "0.5.0",
+            "CFBundleVersion": "0.5.0",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },
