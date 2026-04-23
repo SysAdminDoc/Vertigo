@@ -14,8 +14,18 @@ from .theme import current_palette
 
 
 class RangeSlider(QWidget):
+    """Dual-thumb trim slider with optional shot-boundary snap.
+
+    When `set_shot_boundaries([...])` is fed a list of boundary times
+    (in seconds), the widget paints a subtle tick at each boundary
+    and the trim thumbs magnet-snap to any boundary within a
+    resolution-relative window (currently 200 ms).
+    """
+
     range_changed = pyqtSignal(float, float)
     playhead_seek = pyqtSignal(float)
+
+    SNAP_WINDOW_SEC = 0.20  # within 200 ms → magnet-snap
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -30,6 +40,7 @@ class RangeSlider(QWidget):
         self._high: float = 0.0
         self._playhead: float = 0.0
         self._drag: str | None = None  # "low" | "high" | "playhead" | None
+        self._shots: tuple[float, ...] = ()
 
     def set_duration(self, d: float) -> None:
         self._duration = max(0.0, d)
@@ -45,10 +56,17 @@ class RangeSlider(QWidget):
         self._high = 0.0
         self._playhead = 0.0
         self._drag = None
+        self._shots = ()
         self.update()
 
     def set_playhead(self, t: float) -> None:
         self._playhead = max(0.0, min(self._duration, t))
+        self.update()
+
+    def set_shot_boundaries(self, boundaries: list[float]) -> None:
+        """Install shot-cut positions (seconds) for tick drawing + snap."""
+        clamped = [float(t) for t in boundaries if 0.0 < float(t) < self._duration]
+        self._shots = tuple(sorted(set(round(t, 3) for t in clamped)))
         self.update()
 
     def low(self) -> float:
@@ -78,6 +96,21 @@ class RangeSlider(QWidget):
                 p.drawRoundedRect(self.rect().adjusted(1, 1, -2, -2), 8, 8)
             p.end()
             return
+
+        # Shot-boundary ticks — faint vertical marks above the track so
+        # the user sees where real cuts live. Drawn before the selection
+        # so they sit under the accent fill.
+        if self._shots:
+            tick_color = QColor(theme.overlay1)
+            tick_color.setAlpha(130)
+            tick_pen = QPen(tick_color)
+            tick_pen.setWidthF(1.0)
+            p.setPen(tick_pen)
+            top_y = track_rect.top() - 6
+            bot_y = track_rect.bottom() + 6
+            for t in self._shots:
+                x = self._t_to_x(t)
+                p.drawLine(int(x), int(top_y), int(x), int(bot_y))
 
         lo_x = self._t_to_x(self._low)
         hi_x = self._t_to_x(self._high)
@@ -144,6 +177,8 @@ class RangeSlider(QWidget):
                 self.setCursor(Qt.CursorShape.SizeHorCursor if near_thumb else Qt.CursorShape.PointingHandCursor)
             return
         t = self._x_to_t(event.position().x())
+        if self._drag in ("low", "high"):
+            t = self._apply_snap(t)
         if self._drag == "low":
             self._low = max(0.0, min(t, self._high - 0.1))
             self.range_changed.emit(self._low, self._high)
@@ -154,6 +189,15 @@ class RangeSlider(QWidget):
             self._playhead = t
             self.playhead_seek.emit(t)
         self.update()
+
+    def _apply_snap(self, t: float) -> float:
+        """Snap `t` to the nearest shot boundary if within the window."""
+        if not self._shots:
+            return t
+        nearest = min(self._shots, key=lambda s: abs(s - t))
+        if abs(nearest - t) <= self.SNAP_WINDOW_SEC:
+            return float(nearest)
+        return t
 
     def mouseReleaseEvent(self, event) -> None:
         self._drag = None

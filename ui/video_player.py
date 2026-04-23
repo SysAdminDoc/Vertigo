@@ -343,6 +343,10 @@ class VideoPlayer(QWidget):
     def set_track_x(self, x: float | None) -> None:
         self.canvas.set_track_x(x)
 
+    def set_shot_boundaries(self, boundaries: list[float]) -> None:
+        """Forward scene cuts to the scrubber for tick drawing + snap."""
+        self._scrubber.set_shot_boundaries(boundaries)
+
     def trim_range(self) -> tuple[float, float]:
         return self._scrubber.low(), self._scrubber.high()
 

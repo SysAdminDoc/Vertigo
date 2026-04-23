@@ -72,10 +72,13 @@ single-clip editor. *LLM-viral-scoring + thumbnails + uploads* is
 OpusClip's lane — every OSS attempt is mediocre. Build the former,
 never the latter.
 
-- [ ] **T3a · TransNetV2 shot-snap on trim timeline** · ~3–4 h · `transnetv2-pytorch` (MIT)
-  `QThread` runs inference on import; `shot_boundaries: list[float]`
-  stored on the clip; trim handles magnet-snap within 200 ms and
-  the timeline draws tick marks. Highest-ROI item in Tier 3.
+- [x] **T3a · Shot-snap on trim timeline** · ~3 h · v0.9.0 · existing PySceneDetect
+  Scope changed from transnetv2-pytorch to the PySceneDetect we
+  already ship — 500 MB PyTorch dep wasn't worth the +4 % F1. New
+  `SceneWorker` runs on every clip load; `RangeSlider` draws
+  subtle tick marks at each cut and magnet-snaps trim handles
+  within 200 ms. Scene list also reused by Smart Track so the
+  inline pass is skipped when the background worker has finished.
 
 - [ ] **T3b · Segment proposals via ClipsAI TextTiling** · ~3 h · ClipsAI (MIT, fork — upstream dead)
   On import of > 10 min clips, produce a side panel of candidate
@@ -83,9 +86,12 @@ never the latter.
   on WhisperX word stream, ranked by `?`-count, laughter tokens,
   silence-gap heuristics. **Stop before the LLM step.**
 
-- [ ] **T3c · Hook-energy score** · ~1 h · `librosa` + `silero-vad`
-  First-3-second score (0–100) on each proposal using RMS energy +
-  VAD. Label "hook energy", not "virality". Honest, deterministic.
+- [x] **T3c · Hook-energy score** · ~1 h · v0.9.0 · no new deps
+  `core/hook_score.py` produces a 0–100 "first-3-second" score from
+  FFmpeg-extracted 16 kHz mono PCM + per-frame RMS/ZCR voice
+  heuristic. Surfaced in the dry-run report as `Hook (first 3s)`.
+  Deliberately ignored the `librosa + silero-vad` suggestion — no
+  need for torch just to RMS a 3-second window.
 
 ---
 

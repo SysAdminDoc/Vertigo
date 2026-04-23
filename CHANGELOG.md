@@ -2,6 +2,35 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.9.0] - 2026-04-23
+
+### Tier 3 (partial) · Shot-boundary UX + hook-energy signal
+
+**T3a · Shot-snap on trim timeline (`v0.9.0`).** Scope refined from the research report's `transnetv2-pytorch` suggestion to the `PySceneDetect` we already ship — the research agent called TransNetV2 "highest-ROI item in Tier 3", but the real value is the *interaction* (snap-to-cut trim handles + visible ticks), not the SOTA algorithm. A 500 MB PyTorch dependency for a +4 % F1 improvement over PySceneDetect is not a trade we'd make.
+
+- `workers/scene_worker.py` — a `QThread` that runs scene detection off the UI thread on every clip load (previously only ran when Smart Track was invoked, so the trim timeline had no knowledge of cuts).
+- `ui/range_slider.py` — new `set_shot_boundaries(list[float])` API. Paints a faint vertical tick at each cut, slightly above + below the slider track, under the accent fill so it sits behind the selection. Trim thumbs magnet-snap to the nearest boundary within a 200 ms window via a new `_apply_snap()` helper.
+- `ui/video_player.py` — `set_shot_boundaries(...)` forwarder so `MainWindow` can address the slider without reaching through two layers.
+- `ui/main_window.py::_kick_scene_detection` fires on every clip select; `_on_scenes_ready` stashes the result in `self._scenes` (reused by Smart Track) and pushes boundaries to the slider. Clear-clip cancels any in-flight worker and wipes ticks.
+- Smart Track's `_run_detect()` now skips the inline `detect_scenes()` pass when the background worker has already produced a result.
+
+**T3c · Hook-energy score (`v0.9.0`).** New `core/hook_score.py` produces a 0–100 engagement signal for the first 3 seconds of audio. Ignored the research report's `librosa + silero-vad` suggestion — no need for torch just to RMS a 3-second window.
+
+- Audio grabbed via `ffmpeg -t 3 -ac 1 -ar 16000 -f s16le -` (FFmpeg is already required).
+- Pure-Python per-frame RMS + zero-crossing-rate voice heuristic (speech: non-trivial RMS + ZCR in 0.02–0.35 range).
+- Percentile-normalised energy so a single loud burst doesn't flatten the rest of the window.
+- `HookScore` dataclass with `.score`, `.label` (`silent`/`weak`/`moderate`/`strong`), `.voice_fraction`, `.mean_voiced_energy`.
+- Surfaced in the dry-run report (`core/dryrun.py`) as `Hook (first 3s): 72 · strong · voice 88% · energy 64%`.
+- Ready to plug into the future T3b proposal panel.
+
+**T3b is explicitly not landed yet** — the proposal UI needs design work (probably a new tab or a queue-panel mode) and T3c's scoring is useful without it for any single-clip analysis.
+
+### Verified
+- Shot ticks render correctly on the trim slider with three sample boundaries.
+- `set_shot_boundaries` forwarder wired through `VideoPlayer` → `RangeSlider`.
+- Hook score runs against a 3 s sine-wave test clip and returns `99 · strong` (expected: pure 440 Hz is continuous voice-band energy).
+- `MainWindow` constructs cleanly with all 6 tabs intact.
+
 ## [0.8.0] - 2026-04-23
 
 ### Captions leap (Tier 1 from the competitive-research roadmap)

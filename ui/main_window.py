@@ -35,6 +35,7 @@ from core.scenes import detect_scenes
 from core.subtitles import is_installed as subtitles_installed
 from workers.detect_worker import DetectWorker
 from workers.encode_worker import EncodeWorker
+from workers.scene_worker import SceneWorker
 from workers.subtitle_worker import SubtitleWorker
 
 from .adjustments_panel import AdjustmentsPanel
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         self._detect_worker: DetectWorker | None = None
         self._encode_worker: EncodeWorker | None = None
         self._subtitle_worker: SubtitleWorker | None = None
+        self._scene_worker: SceneWorker | None = None
         self._batch_running: bool = False
         self._suppress_auto_detect: bool = False
         self._last_output_path: Path | None = None
@@ -640,6 +642,7 @@ class MainWindow(QMainWindow):
         )
         self._player.load(entry.path)
         self._preview_stack.setCurrentWidget(self._player)
+        self._player.set_shot_boundaries([])  # clear stale ticks from prior clip
         self._export_btn.setEnabled(True)
         self._titlebar.set_subtitle(f"Ready - {entry.path.name}")
         self._player.set_aspect(self._preset.width, self._preset.height)
@@ -650,6 +653,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_subs_panel"):
             self._subs_panel.set_clip_loaded(True)
             self._subs_panel.set_srt_path(self._clip_subs.get(entry.id))
+        self._kick_scene_detection(info.path)
         if hasattr(self, "_overlays_panel"):
             self._overlays_panel.set_duration(info.duration)
 
@@ -704,6 +708,9 @@ class MainWindow(QMainWindow):
         self._scenes = []
         self._scene_label.setText("")
         self._detect_status.setText("Load a clip to find faces and scene cuts.")
+        if self._scene_worker and self._scene_worker.isRunning():
+            self._scene_worker.cancel()
+        self._player.set_shot_boundaries([])
         self._player.clear()
         self._preview_stack.setCurrentWidget(self._drop)
         self._set_meta_text("Waiting for a clip")
@@ -819,17 +826,21 @@ class MainWindow(QMainWindow):
             return
         if self._detect_worker and self._detect_worker.isRunning():
             return
-        self._detect_status.setText("Scanning for faces and scene cuts\u2026")
+        self._detect_status.setText("Scanning for faces\u2026")
         self._detect_progress.setValue(0)
         self._detect_progress.setFormat("Analysis %p%")
         self._detect_progress.show()
         self._refresh_detection_actions()
 
-        # scene detection is quick; run inline
-        try:
-            self._scenes = detect_scenes(self._info.path)
-        except Exception:
-            self._scenes = []
+        # Scene detection is already kicked off on clip load and its
+        # result is stored in `self._scenes`. If the background worker
+        # hasn't finished yet, fall back to an inline pass so Smart
+        # Track isn't blocked waiting on it.
+        if not self._scenes:
+            try:
+                self._scenes = detect_scenes(self._info.path)
+            except Exception:
+                self._scenes = []
         if self._scenes:
             n = len(self._scenes)
             self._scene_label.setText(f"{n} scene{'' if n == 1 else 's'} detected \u00b7 panning will respect cuts")
@@ -1050,6 +1061,36 @@ class MainWindow(QMainWindow):
             self._log.append(line)
         self._set_export_status("Plan ready")
         self._toast.show_toast("Dry-run plan written to the export log.", kind="info")
+
+    def _kick_scene_detection(self, path: Path) -> None:
+        """Fire-and-forget scene detection so the trim timeline can snap
+        to real cuts. Cancels any in-flight scan from a previous clip."""
+        if self._scene_worker and self._scene_worker.isRunning():
+            self._scene_worker.cancel()
+            self._scene_worker.wait(200)
+
+        worker = SceneWorker(path)
+        worker.finished_ok.connect(self._on_scenes_ready)
+        worker.failed.connect(lambda _msg: None)  # quiet failure — ticks are optional
+        self._scene_worker = worker
+        worker.start()
+
+    def _on_scenes_ready(self, scenes: list) -> None:
+        # Guard against stale results from a previous clip
+        if not self._info:
+            return
+        self._scenes = scenes or []
+        boundaries = [end for (_start, end) in self._scenes
+                      if 0.0 < end < self._info.duration]
+        self._player.set_shot_boundaries(boundaries)
+        if hasattr(self, "_scene_label") and self._mode is ReframeMode.SMART_TRACK:
+            if scenes:
+                n = len(scenes)
+                self._scene_label.setText(
+                    f"{n} scene{'' if n == 1 else 's'} detected \u00b7 panning will respect cuts"
+                )
+            else:
+                self._scene_label.setText("Continuous take \u2014 no hard cuts detected")
 
     def _smart_track_crop_width_frac(self, *, info: VideoInfo | None = None) -> float | None:
         """Return the 9:16 viewport width as a fraction of source width,

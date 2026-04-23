@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .detect import TrackPoint
 from .encoders import Encoder
+from .hook_score import score_hook
 from .preflight import plan_preflight
 from .presets import Preset
 from .probe import VideoInfo
@@ -107,6 +108,18 @@ def build_report(
     ))
 
     rows.append(DryRunRow("Mode", mode.value.replace("_", " ").title()))
+
+    # Hook-energy score on the first 3 s of audio — a signal, not a verdict
+    if info.has_audio:
+        try:
+            hook = score_hook(info.path, window_sec=3.0)
+            rows.append(DryRunRow(
+                "Hook (first 3s)",
+                f"{hook.as_badge()}  \u00b7  voice {hook.voice_fraction * 100:.0f}%  "
+                f"\u00b7  energy {hook.mean_voiced_energy * 100:.0f}%",
+            ))
+        except Exception:
+            pass
 
     plan = build_plan(
         info,
