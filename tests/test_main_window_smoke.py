@@ -64,12 +64,9 @@ class MainWindowSmokeTests(unittest.TestCase):
                 for theme_id in ("mocha", "graphite", "latte"):
                     win._apply_theme(theme_id, persist=False)
 
-                # clear directly — win._clear_queue() would pop a modal
-                # QMessageBox, which hangs offscreen tests. Exercise the
-                # underlying queue API + the active-clip reset helper
-                # that the signal handler calls on confirmation.
-                win._queue.clear()
-                win._clear_active_clip()
+                # Exercise the full clear path (confirm=False skips the
+                # modal that would otherwise hang offscreen tests).
+                win._clear_queue(confirm=False)
                 self.assertEqual(win._queue.count(), 0)
             finally:
                 win.close()

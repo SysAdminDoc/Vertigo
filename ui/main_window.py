@@ -1034,8 +1034,15 @@ class MainWindow(MainControllerMixin, QMainWindow):
             else:
                 self._clear_active_clip()
 
-    def _clear_queue(self) -> None:
-        if self._queue.count():
+    def _clear_queue(self, *, confirm: bool = True) -> None:
+        """Drop every queue entry and reset the active clip.
+
+        ``confirm=True`` (default) pops a modal when the queue is non-empty
+        — wired to the toolbar's clear button where undoing is a chore.
+        ``confirm=False`` skips the dialog so automated tests can exercise
+        the reset path without hanging on an offscreen modal.
+        """
+        if confirm and self._queue.count():
             answer = QMessageBox.question(
                 self,
                 "Clear queue?",
