@@ -66,7 +66,7 @@ class SubtitlesPanel(QWidget):
 
         self._toggle = QCheckBox("Burn captions into the exported video")
         self._toggle.setAccessibleName("Toggle subtitle burn-in")
-        self._toggle.setToolTip("When enabled, generated captions will be baked into the output pixels.")
+        self._toggle.setToolTip("When enabled, generated captions are baked directly into the exported pixels.")
         self._toggle.toggled.connect(lambda _: self.changed.emit(self._choice()))
         root.addWidget(self._toggle)
 
@@ -78,7 +78,7 @@ class SubtitlesPanel(QWidget):
         model_lbl.setObjectName("formLabel")
         self._model = QComboBox()
         self._model.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._model.setToolTip("Whisper model size. Bigger = better quality, slower, more RAM.")
+        self._model.setToolTip("Larger models transcribe more accurately but take longer and use more RAM.")
         for name in AVAILABLE_MODELS:
             self._model.addItem(name, name)
         default_idx = self._model.findData(DEFAULT_MODEL)
@@ -99,7 +99,8 @@ class SubtitlesPanel(QWidget):
         root.addLayout(grid)
 
         self._status = QLabel(
-            "AI captions use faster-whisper. The model downloads on first use."
+            "Captions are transcribed locally with faster-whisper. "
+            "The chosen model downloads the first time you use it."
         )
         self._status.setObjectName("subtitle")
         self._status.setWordWrap(True)
@@ -108,7 +109,7 @@ class SubtitlesPanel(QWidget):
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
-        self._progress.setFormat("Transcription %p%")
+        self._progress.setTextVisible(False)
         self._progress.hide()
         root.addWidget(self._progress)
 
@@ -117,14 +118,14 @@ class SubtitlesPanel(QWidget):
         self._transcribe_btn = QPushButton("Generate captions")
         self._transcribe_btn.setObjectName("primaryBtn")
         self._transcribe_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._transcribe_btn.setToolTip("Transcribe the current clip into a captions file")
+        self._transcribe_btn.setToolTip("Transcribe the current clip and save an SRT alongside it")
         self._transcribe_btn.setEnabled(False)
         self._transcribe_btn.clicked.connect(self._emit_transcribe)
 
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setObjectName("ghostBtn")
         self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._clear_btn.setToolTip("Forget generated captions for this clip")
+        self._clear_btn.setToolTip("Discard captions generated for this clip")
         self._clear_btn.setEnabled(False)
         self._clear_btn.clicked.connect(self._on_clear)
 
@@ -143,7 +144,9 @@ class SubtitlesPanel(QWidget):
     def set_running(self, running: bool) -> None:
         self._running = running
         self._transcribe_btn.setEnabled(not running and self._transcribe_btn.isEnabled())
-        self._transcribe_btn.setText("Generating..." if running else "Generate captions")
+        self._transcribe_btn.setText(
+            "Transcribing\u2026" if running else "Generate captions"
+        )
         if running:
             self._progress.setValue(0)
             self._progress.show()

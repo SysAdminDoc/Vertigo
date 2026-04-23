@@ -277,20 +277,20 @@ class MainWindow(QMainWindow):
 
         self._mode_cards = {
             ReframeMode.CENTER: ModeCard(
-                "\u25A0", "Center Crop",
+                "center", "Center crop",
                 "Static crop for footage that is already centered."
             ),
             ReframeMode.SMART_TRACK: ModeCard(
-                "\u25C9", "Smart Track",
-                "Follows faces while respecting scene cuts."
+                "smart_track", "Smart track",
+                "Follows faces, never pans across a scene cut."
             ),
             ReframeMode.BLUR_LETTERBOX: ModeCard(
-                "\u25A3", "Blur Letterbox",
-                "Keeps the full frame on a soft backdrop."
+                "blur_letterbox", "Blur letterbox",
+                "Keeps the full frame on a soft blurred backdrop."
             ),
             ReframeMode.MANUAL: ModeCard(
-                "\u25A9", "Manual Crop",
-                "Drag the preview frame to choose the crop."
+                "manual", "Manual crop",
+                "Drag the viewport on the preview to lock a column."
             ),
         }
         for m, card in self._mode_cards.items():

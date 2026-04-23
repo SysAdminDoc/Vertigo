@@ -48,7 +48,7 @@ class OutputPanel(QWidget):
         # encoder -------------------------------------------------------
         self._encoder_combo = QComboBox()
         self._encoder_combo.setAccessibleName("Video encoder")
-        self._encoder_combo.setToolTip("Choose the encoder FFmpeg will use")
+        self._encoder_combo.setToolTip("Which encoder FFmpeg will hand the frames to")
         self._encoder_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         if self._encoders:
             for enc in self._encoders:
@@ -73,7 +73,7 @@ class OutputPanel(QWidget):
         self._quality.setValue(75)
         self._quality.setPageStep(5)
         self._quality.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._quality.setToolTip("Higher = better quality, bigger file")
+        self._quality.setToolTip("Higher keeps more detail; lower makes the file smaller")
         self._quality.setAccessibleName("Output quality")
 
         self._quality_v = QLabel("75")
@@ -87,7 +87,7 @@ class OutputPanel(QWidget):
         # speed preset --------------------------------------------------
         self._speed_combo = QComboBox()
         self._speed_combo.setAccessibleName("Encoder speed preset")
-        self._speed_combo.setToolTip("Encoding speed vs. efficiency")
+        self._speed_combo.setToolTip("Slower presets squeeze more quality out of each bit")
         self._speed_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_row(lay, 2, "Speed", self._speed_combo, None)
         self._speed_combo.currentIndexChanged.connect(self._emit_change)

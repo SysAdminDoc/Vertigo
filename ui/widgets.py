@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .mode_icons import ModeIcon
 from .theme import current_palette
 
 
@@ -45,11 +46,24 @@ class GlassPanel(QFrame):
 
 
 class ModeCard(QPushButton):
-    """Toggleable card for a reframe mode."""
+    """Toggleable card for a reframe mode.
+
+    First positional arg is the *kind* string (``center`` / ``smart_track``
+    / ``blur_letterbox`` / ``manual``) which drives both the painted icon
+    and accessibility metadata. The legacy glyph-character first arg is
+    still accepted for backwards compatibility and is mapped through.
+    """
+
+    _LEGACY_GLYPH_MAP = {
+        "\u25A0": "center",
+        "\u25C9": "smart_track",
+        "\u25A3": "blur_letterbox",
+        "\u25A9": "manual",
+    }
 
     def __init__(
         self,
-        icon_char: str,
+        kind: str,
         title: str,
         subtitle: str,
         parent: QWidget | None = None,
@@ -59,20 +73,20 @@ class ModeCard(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(76)
+        self.setMinimumHeight(80)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setToolTip(subtitle)
         self.setAccessibleName(title)
         self.setAccessibleDescription(subtitle)
 
+        resolved_kind = self._LEGACY_GLYPH_MAP.get(kind, kind)
+
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setContentsMargins(16, 12, 18, 12)
         lay.setSpacing(14)
 
-        self._icon = QLabel(icon_char)
-        self._icon.setFixedWidth(32)
-        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self._icon)
+        self._icon = ModeIcon(resolved_kind)
+        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
@@ -83,12 +97,17 @@ class ModeCard(QPushButton):
         text_col.addWidget(self._subtitle)
         lay.addLayout(text_col, 1)
         self.refresh_theme()
+        self.toggled.connect(self._icon.set_active)
 
     def refresh_theme(self) -> None:
         theme = current_palette()
-        self._icon.setStyleSheet(f"color: {theme.accent}; font-size: 22px; font-weight: 700;")
-        self._title.setStyleSheet(f"color: {theme.text}; font-size: 13px; font-weight: 700;")
-        self._subtitle.setStyleSheet(f"color: {theme.subtext0}; font-size: 11px;")
+        self._title.setStyleSheet(
+            f"color: {theme.text}; font-size: 13px; font-weight: 600; letter-spacing: -0.1px;"
+        )
+        self._subtitle.setStyleSheet(
+            f"color: {theme.subtext0}; font-size: 11px; line-height: 140%;"
+        )
+        self._icon.update()
 
 
 class Toast(QLabel):

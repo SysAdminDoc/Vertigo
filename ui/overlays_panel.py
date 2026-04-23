@@ -64,8 +64,8 @@ class OverlayRow(QFrame):
         row1 = QHBoxLayout()
         row1.setSpacing(8)
         self._text = QLineEdit(overlay.text)
-        self._text.setPlaceholderText("Overlay text — supports \\n for new line")
-        self._text.setToolTip("Overlay text (Shift+Enter for new line in drawtext)")
+        self._text.setPlaceholderText("Overlay text  \u2014  type \\n for a new line")
+        self._text.setToolTip("What the overlay says. Use \\n to force a line break.")
         self._text.setAccessibleName("Overlay text")
         self._text.textChanged.connect(self._bump)
         row1.addWidget(self._text, 1)
@@ -192,7 +192,7 @@ class OverlaysPanel(QWidget):
 
         hdr = QHBoxLayout()
         hdr.setSpacing(8)
-        self._hint = QLabel("Title cards and lower-thirds render on top of every export.")
+        self._hint = QLabel("Title cards and lower-thirds are burned into every export.")
         self._hint.setObjectName("subtitle")
         self._hint.setWordWrap(True)
         hdr.addWidget(self._hint, 1)
@@ -200,7 +200,7 @@ class OverlaysPanel(QWidget):
         self._presets_btn = QPushButton("Add preset")
         self._presets_btn.setObjectName("ghostBtn")
         self._presets_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._presets_btn.setToolTip("Insert a common overlay")
+        self._presets_btn.setToolTip("Insert a pre-styled overlay preset")
         self._presets_btn.clicked.connect(self._show_presets)
         hdr.addWidget(self._presets_btn)
 
