@@ -2,6 +2,30 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.6.1] - 2026-04-23
+
+### Fixed
+- **Critical — PyInstaller binary crashed on launch with `AttributeError: 'NoneType' object has no attribute 'write'`.** Two bugs stacked:
+  1. Under a Windows GUI PyInstaller build (`console=False`), `sys.stderr` and `sys.stdout` are both `None`. The existing `sys.stderr.write(...)` call inside `_bootstrap()` therefore exploded *while reporting a different error* — swallowing the real message.
+  2. The real message was `mediapipe: ModuleNotFoundError: No module named 'matplotlib'`. MediaPipe imports matplotlib internally; the spec had matplotlib in its `excludes` list to keep the binary small, which broke MediaPipe at bundle-import time.
+- New `_fatal(title, body)` helper in `vertigo.py`:
+  - Writes every fatal error to `%LOCALAPPDATA%\Vertigo\crash.log` (macOS: `~/Library/Logs/Vertigo`; Linux: `~/.local/state/Vertigo`).
+  - Echoes to `sys.stderr` only when it is not `None`.
+  - Pops a native Windows `MessageBoxW` so GUI-mode users actually see the failure.
+  - Exits cleanly with a distinct code (2/3/4/10) per failure class.
+- Replaced every raw `sys.stderr.write(...)` and `print(...)` in `_bootstrap()` / `_check_ffmpeg()` with the new helper.
+- Wrapped `main()` in an `_entry()` guard so a late-import or Qt-init crash still surfaces a MessageBox instead of closing the GUI silently.
+- `_REQUIRED` import loop now catches `Exception`, not just `ImportError`, so modules that fail at init time (not just missing ones) also report cleanly.
+
+### Changed
+- `matplotlib` and `scipy` removed from PyInstaller `excludes` — both are transitive MediaPipe dependencies. Binary size increases by ~40 MB on Windows; acceptable trade for correctness.
+- `vertigo.spec` now runs `collect_submodules("scenedetect" | "cv2" | "PIL")` + `collect_data_files("scenedetect" | "cv2")` in addition to the existing MediaPipe collection, to preempt the next lazy-import miss.
+- Explicit hiddenimports for every `scenedetect.detectors.*` submodule (content/threshold/adaptive/hash/histogram) — PySceneDetect loads detectors via string reference, which PyInstaller's static analyzer can't follow.
+
+### Verified
+- Rebuilt `Vertigo.exe` launches cleanly on Windows 11. Process monitoring shows exactly two PIDs (bootloader + runtime), runtime stabilizes at ~198 MB with the Qt main window visible, no crash log written, killed cleanly.
+- No `'NoneType' object has no attribute 'write'` regression.
+
 ## [0.6.0] - 2026-04-22
 
 ### Changed

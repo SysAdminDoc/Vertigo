@@ -26,33 +26,60 @@ else:
     icon_file = None
 
 # MediaPipe ships TFLite models inside the wheel; PyInstaller doesn't pick
-# them up automatically. We copy the whole mediapipe data payload.
+# them up automatically. We copy the whole data payload + every submodule.
+# Same for PySceneDetect (lazy detector imports) and Pillow plugins.
 try:
     from PyInstaller.utils.hooks import collect_data_files, collect_submodules
     mediapipe_datas = collect_data_files("mediapipe")
     mediapipe_hidden = collect_submodules("mediapipe")
+    scenedetect_hidden = collect_submodules("scenedetect")
+    scenedetect_datas = collect_data_files("scenedetect")
+    cv2_datas = collect_data_files("cv2")
+    cv2_hidden = collect_submodules("cv2")
+    pil_hidden = collect_submodules("PIL")
 except Exception:
     mediapipe_datas = []
     mediapipe_hidden = []
+    scenedetect_hidden = []
+    scenedetect_datas = []
+    cv2_datas = []
+    cv2_hidden = []
+    pil_hidden = []
 
 datas = [
     (str(asset_dir), "assets"),
-] + mediapipe_datas
+] + mediapipe_datas + scenedetect_datas + cv2_datas
 
-hiddenimports = [
-    "PyQt6.QtMultimedia",
-    "PyQt6.QtSvg",
-    "PyQt6.QtSvgWidgets",
-    "cv2",
-    "mediapipe",
-    "scenedetect",
-    "scenedetect.detectors",
-] + mediapipe_hidden
+hiddenimports = (
+    [
+        "PyQt6.QtMultimedia",
+        "PyQt6.QtSvg",
+        "PyQt6.QtSvgWidgets",
+        # scenedetect loads detectors via string reference — force-bundle them
+        "scenedetect.detectors.content_detector",
+        "scenedetect.detectors.threshold_detector",
+        "scenedetect.detectors.adaptive_detector",
+        "scenedetect.detectors.hash_detector",
+        "scenedetect.detectors.histogram_detector",
+        # Pillow plugins are imported via plugin registration at PIL init
+        "PIL.Image",
+        "PIL.ImageDraw",
+        "PIL.ImageFilter",
+        "PIL.ImageFont",
+        "PIL.ImageQt",
+    ]
+    + mediapipe_hidden
+    + scenedetect_hidden
+    + cv2_hidden
+    + pil_hidden
+)
 
 excludes = [
     "tkinter",
-    "matplotlib",
-    "scipy",
+    # NOTE: matplotlib + scipy are NOT excluded — MediaPipe imports them
+    # internally (drawing utilities, signal processing) and skipping them
+    # causes "ModuleNotFoundError: No module named 'matplotlib'" at bundle
+    # import time. The ~150 MB added to the exe is the cost of correctness.
     "pandas",
     "torch",
     "tensorflow",
@@ -61,7 +88,7 @@ excludes = [
     "sphinx",
     "pytest",
     # faster-whisper is opt-in and installed at runtime on demand; keep it
-    # out of the bundled exe to stay under 400 MB.
+    # out of the bundled exe to stay under 500 MB.
     "faster_whisper",
     "ctranslate2",
     "torchaudio",
@@ -121,8 +148,8 @@ if sys.platform == "darwin":
         icon=icon_file,
         bundle_identifier="com.sysadmindoc.vertigo",
         info_plist={
-            "CFBundleShortVersionString": "0.6.0",
-            "CFBundleVersion": "0.6.0",
+            "CFBundleShortVersionString": "0.6.1",
+            "CFBundleVersion": "0.6.1",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },
