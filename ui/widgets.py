@@ -31,7 +31,7 @@ class GlassPanel(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         self._outer = QVBoxLayout(self)
-        self._outer.setContentsMargins(18, 16, 18, 16)
+        self._outer.setContentsMargins(16, 16, 16, 16)
         self._outer.setSpacing(12)
 
         if title:
@@ -84,8 +84,8 @@ class ModeCard(QPushButton):
         resolved_kind = self._LEGACY_GLYPH_MAP.get(kind, kind)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 12, 18, 12)
-        lay.setSpacing(14)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(12)
 
         self._icon = ModeIcon(resolved_kind)
         lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -107,7 +107,7 @@ class ModeCard(QPushButton):
             f"color: {theme.text}; font-size: 13px; font-weight: 600; letter-spacing: -0.1px;"
         )
         self._subtitle.setStyleSheet(
-            f"color: {theme.subtext0}; font-size: 11px; line-height: 140%;"
+            f"color: {theme.subtext0}; font-size: 11px;"
         )
         self._icon.update()
 
@@ -154,19 +154,19 @@ class Toast(QLabel):
         self._timer.start(duration_ms)
 
     def _apply_style(self) -> None:
-        colors = {
-            "success": current_palette().green,
-            "warning": current_palette().yellow,
-            "error": current_palette().red,
-            "info": current_palette().accent,
-        }
         theme = current_palette()
-        accent = colors.get(self._kind, theme.accent)
+        tones = {
+            "success": theme.green,
+            "warning": theme.yellow,
+            "error": theme.red,
+            "info": theme.accent,
+        }
+        accent = tones.get(self._kind, theme.accent)
         self.setStyleSheet(
-            f"background: {theme.surface0};"
+            f"background: {theme.mantle};"
             f"color: {theme.text};"
             f"border: 1px solid {accent};"
-            f"border-radius: 8px;"
+            f"border-radius: 10px;"
             f"padding: 10px 16px; font-size: 12px; font-weight: 600;"
         )
 

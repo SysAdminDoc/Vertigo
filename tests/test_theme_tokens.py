@@ -41,6 +41,39 @@ class ThemeTokenTests(unittest.TestCase):
                 self.assertIn("QFileDialog", stylesheet)
                 self.assertIn("QLineEdit", stylesheet)
 
+    def test_stylesheet_covers_every_common_widget_class(self) -> None:
+        required_selectors = (
+            "QCheckBox", "QRadioButton", "QGroupBox", "QMenu",
+            "QComboBox", "QSlider", "QProgressBar", "QTabWidget",
+            "QScrollBar", "QToolTip",
+        )
+        for theme_id in THEMES:
+            stylesheet = build_stylesheet(theme_id)
+            for selector in required_selectors:
+                with self.subTest(theme=theme_id, selector=selector):
+                    self.assertIn(selector, stylesheet)
+
+    def test_stylesheet_is_free_of_dead_line_height_rules(self) -> None:
+        # Qt Widgets QSS ignores `line-height`; keep the stylesheet free of
+        # it so readers don't expect the declared spacing to apply.
+        for theme_id in THEMES:
+            self.assertNotIn("line-height", build_stylesheet(theme_id))
+
+    def test_radii_follow_token_scale(self) -> None:
+        # We reserve 6 / 10 / 14 / 18 / 999 for the product. Any other
+        # radius would be drift worth cleaning up before we ship.
+        # 2/3/4/5/9 are half-values used on handle-sized elements
+        # (scrollbar, splitter, progress chunk, slider thumb).
+        allowed = {"6px", "8px", "10px", "14px", "18px", "999px",
+                   "2px", "3px", "4px", "5px", "9px"}
+        import re
+        for theme_id in THEMES:
+            sheet = build_stylesheet(theme_id)
+            for match in re.findall(r"border-radius:\s*([^;]+);", sheet):
+                value = match.strip()
+                with self.subTest(theme=theme_id, value=value):
+                    self.assertIn(value, allowed)
+
     def test_theme_preference_sanitization(self) -> None:
         self.assertEqual(sanitize_theme_preference("mocha"), "mocha")
         self.assertEqual(sanitize_theme_preference("latte"), "latte")

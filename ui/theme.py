@@ -386,13 +386,13 @@ QComboBox#themePicker:focus {{
 QWidget#glassPanel, QFrame#glassPanel {{
     background: {t.mantle};
     border: 1px solid {t.surface0};
-    border-radius: 16px;
+    border-radius: 14px;
 }}
 
 QWidget#heroPanel, QFrame#heroPanel {{
     background: {t.mantle};
     border: 1px solid {t.surface0};
-    border-radius: 20px;
+    border-radius: 18px;
 }}
 
 QWidget#emptyState {{
@@ -421,7 +421,6 @@ QLabel#bigTitle {{
 QLabel#subtitle {{
     color: {t.subtext0};
     font-size: 12px;
-    line-height: 140%;
 }}
 
 QLabel#valueMuted {{
@@ -459,7 +458,6 @@ QLabel#emptyTitle {{
 QLabel#emptyBody {{
     color: {t.subtext0};
     font-size: 12px;
-    line-height: 160%;
 }}
 
 /* ------------------------------------------------------------- pills & notices */
@@ -501,7 +499,6 @@ QLabel#inlineNotice {{
     border-radius: 10px;
     padding: 10px 12px;
     font-size: 12px;
-    line-height: 150%;
 }}
 QLabel#inlineNotice[tone="warning"] {{
     color: {t.yellow};
@@ -597,8 +594,8 @@ QPushButton#modeCard {{
     background: {t.base};
     color: {t.subtext1};
     border: 1px solid {t.surface0};
-    border-radius: 12px;
-    padding: 16px 18px;
+    border-radius: 14px;
+    padding: 16px;
     text-align: left;
     font-size: 13px;
     font-weight: 600;
@@ -661,7 +658,6 @@ QLabel#dropZone {{
     padding: 32px;
     background: {t.base};
     font-size: 13px;
-    line-height: 160%;
 }}
 QLabel#dropZone[hover="true"] {{
     border-color: {t.accent};
@@ -751,12 +747,16 @@ QScrollBar::handle:vertical {{
 QScrollBar::handle:vertical:hover {{
     background: {t.surface2};
 }}
+QScrollBar::handle:vertical:pressed {{
+    background: {t.overlay0};
+}}
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical,
 QScrollBar::add-page:vertical,
 QScrollBar::sub-page:vertical {{
     background: none;
     height: 0;
+    width: 0;
 }}
 QScrollBar:horizontal {{
     background: transparent;
@@ -770,6 +770,17 @@ QScrollBar::handle:horizontal {{
 }}
 QScrollBar::handle:horizontal:hover {{
     background: {t.surface2};
+}}
+QScrollBar::handle:horizontal:pressed {{
+    background: {t.overlay0};
+}}
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal {{
+    background: none;
+    height: 0;
+    width: 0;
 }}
 
 /* ------------------------------------------------------------- tooltip */
@@ -810,6 +821,7 @@ QComboBox:disabled {{
 QComboBox::drop-down {{
     border: none;
     width: 22px;
+    margin-right: 2px;
 }}
 QComboBox QAbstractItemView {{
     background: {t.mantle};
@@ -838,13 +850,18 @@ QLineEdit:hover, QPlainTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
     border-color: {t.surface2};
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-    border-color: {t.focus};
+    border-color: {t.accent};
     background: {t.mantle};
 }}
 QLineEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     background: {t.mantle};
     border-color: {t.surface0};
     color: {t.overlay1};
+}}
+QLineEdit[readOnly="true"] {{
+    background: {t.mantle};
+    color: {t.subtext0};
+    border-color: {t.surface0};
 }}
 QSpinBox::up-button, QSpinBox::down-button,
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
@@ -890,7 +907,7 @@ QHeaderView::section {{
 
 QTabWidget#sideTabs::pane {{
     border: 1px solid {t.surface0};
-    border-radius: 16px;
+    border-radius: 14px;
     background: {t.mantle};
     top: 0;
 }}
@@ -981,7 +998,8 @@ QMessageBox QPushButton:focus, QDialog QPushButton:focus, QFileDialog QPushButto
 QCheckBox {{
     color: {t.subtext1};
     font-size: 12px;
-    spacing: 8px;
+    spacing: 10px;
+    padding: 2px 0;
 }}
 QCheckBox::indicator {{
     width: 16px;
@@ -992,17 +1010,112 @@ QCheckBox::indicator {{
 }}
 QCheckBox::indicator:hover {{
     border-color: {t.accent};
+    background: {t.accent_muted};
 }}
 QCheckBox::indicator:checked {{
     background: {t.accent};
     border-color: {t.accent};
-    image: none;
+}}
+QCheckBox::indicator:checked:hover {{
+    background: {t.accent_soft};
+    border-color: {t.accent_soft};
+}}
+QCheckBox::indicator:disabled {{
+    background: {t.mantle};
+    border-color: {t.surface0};
+}}
+QCheckBox:disabled {{
+    color: {t.overlay1};
 }}
 QCheckBox:focus {{
     color: {t.text};
 }}
 QCheckBox::indicator:focus {{
     border-color: {t.focus};
+}}
+
+/* ------------------------------------------------------------- radio */
+
+QRadioButton {{
+    color: {t.subtext1};
+    font-size: 12px;
+    spacing: 10px;
+    padding: 2px 0;
+}}
+QRadioButton::indicator {{
+    width: 16px;
+    height: 16px;
+    border-radius: 9px;
+    border: 1px solid {t.surface2};
+    background: {t.crust};
+}}
+QRadioButton::indicator:hover {{
+    border-color: {t.accent};
+    background: {t.accent_muted};
+}}
+QRadioButton::indicator:checked {{
+    background: {t.crust};
+    border: 5px solid {t.accent};
+}}
+QRadioButton::indicator:checked:hover {{
+    border-color: {t.accent_soft};
+}}
+QRadioButton::indicator:disabled {{
+    background: {t.mantle};
+    border-color: {t.surface0};
+}}
+QRadioButton:disabled {{
+    color: {t.overlay1};
+}}
+QRadioButton::indicator:focus {{
+    border-color: {t.focus};
+}}
+
+/* ------------------------------------------------------------- group */
+
+QGroupBox {{
+    color: {t.subtext0};
+    border: 1px solid {t.surface0};
+    border-radius: 10px;
+    margin-top: 16px;
+    padding: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 6px;
+    color: {t.overlay2};
+    text-transform: uppercase;
+}}
+
+/* ------------------------------------------------------------- menu */
+
+QMenu {{
+    background: {t.mantle};
+    color: {t.text};
+    border: 1px solid {t.surface1};
+    border-radius: 10px;
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 7px 14px 7px 14px;
+    border-radius: 6px;
+    margin: 1px;
+}}
+QMenu::item:selected {{
+    background: {t.accent_selected};
+    color: {t.text};
+}}
+QMenu::item:disabled {{
+    color: {t.overlay1};
+}}
+QMenu::separator {{
+    height: 1px;
+    background: {t.surface0};
+    margin: 4px 6px;
 }}
 """
 

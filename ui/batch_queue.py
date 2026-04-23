@@ -162,12 +162,12 @@ class QueueItem(QFrame):
         if self._selected:
             self.setStyleSheet(
                 f"QFrame#queueItem {{background: {theme.accent_selected}; "
-                f"border: 1px solid {theme.accent}; border-radius: 12px;}}"
+                f"border: 1px solid {theme.accent}; border-radius: 10px;}}"
             )
         else:
             self.setStyleSheet(
                 f"QFrame#queueItem {{background: {theme.base}; "
-                f"border: 1px solid {theme.surface0}; border-radius: 12px;}}"
+                f"border: 1px solid {theme.surface0}; border-radius: 10px;}}"
                 f"QFrame#queueItem:hover {{border-color: {theme.surface2}; background: {theme.accent_hover};}}"
                 f"QFrame#queueItem:focus {{border-color: {theme.focus};}}"
             )
@@ -178,7 +178,7 @@ class QueueItem(QFrame):
             f"color: {_status_color(self.entry.status)}; font-size: 13px; font-weight: 700;"
         )
         self._name.setStyleSheet(f"color: {theme.text}; font-size: 12px; font-weight: 600;")
-        self._sub.setStyleSheet(f"color: {theme.subtext0}; font-size: 10px; line-height: 145%;")
+        self._sub.setStyleSheet(f"color: {theme.subtext0}; font-size: 10px;")
         tone = {
             QueueStatus.PENDING: None,
             QueueStatus.ACTIVE: "accent",
