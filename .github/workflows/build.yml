@@ -48,12 +48,17 @@ jobs:
 
       # FFmpeg is only needed for the build-time smoke import (core.encode
       # imports shutil.which('ffmpeg')). End users install FFmpeg themselves.
-      # FedericoCarboni/setup-ffmpeg is cross-platform and doesn't depend on
-      # Chocolatey's community feed (which has been returning 499 errors).
-      - name: Install FFmpeg
+      # FedericoCarboni/setup-ffmpeg covers Windows+Linux cleanly; it is x64-only
+      # so macOS arm64 falls through to Homebrew (pre-installed on macos-14).
+      - name: Install FFmpeg (Windows/Linux)
+        if: runner.os != 'macOS'
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           ffmpeg-version: release
+
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
 
       - name: Install Python dependencies
         run: |

@@ -50,6 +50,10 @@ desktop.ini
 .vertigo/
 vertigo_cache/
 
+# Release artifacts (attached to GitHub Releases, not committed)
+Vertigo-*.zip
+Vertigo-*.tar.gz
+
 # AI working files — local only, never commit
 CLAUDE.md
 CODEX_CHANGELOG.md
