@@ -304,9 +304,13 @@ def qcolor(hex_or_rgba: str) -> QColor:
 # it to QSvgRenderer and rendering to a QImage.
 
 _GLYPH_SOURCES: dict[str, str] = {
-    # glyph key -> asset filename; colour role is chosen per caller below
-    "check":        "check.svg",
-    "check_minus":  "check_minus.svg",
+    # glyph key -> asset filename; colour role is chosen per caller below.
+    # Same SVG can back multiple tints (e.g. chevron at rest vs. hover/focus).
+    "check":           "check.svg",
+    "check_minus":     "check_minus.svg",
+    "chevron":         "chevron.svg",
+    "chevron_hover":   "chevron.svg",
+    "chevron_focus":   "chevron.svg",
 }
 
 # Rendered at 2x the logical size so the QSS image stays crisp on HiDPI.
@@ -385,8 +389,11 @@ def ensure_glyph_assets(theme_id: str) -> dict[str, Path]:
 
     # (glyph key, hex color)
     recipes: tuple[tuple[str, str], ...] = (
-        ("check",       theme.accent_text),
-        ("check_minus", theme.accent_text),
+        ("check",         theme.accent_text),
+        ("check_minus",   theme.accent_text),
+        ("chevron",       theme.subtext0),
+        ("chevron_hover", theme.text),
+        ("chevron_focus", theme.accent),
     )
     digest = _palette_hash(theme, tuple(c for _, c in recipes))
     out_dir = _cache_root() / theme_id
@@ -435,11 +442,17 @@ def build_stylesheet(preference: str | None = None) -> str:
     t = THEMES[theme_id]
 
     glyphs = ensure_glyph_assets(theme_id)
-    check_url      = _qss_path(glyphs["check"])       if "check"       in glyphs else ""
-    minus_url      = _qss_path(glyphs["check_minus"]) if "check_minus" in glyphs else ""
+    check_url          = _qss_path(glyphs["check"])         if "check"         in glyphs else ""
+    minus_url          = _qss_path(glyphs["check_minus"])   if "check_minus"   in glyphs else ""
+    chevron_url        = _qss_path(glyphs["chevron"])       if "chevron"       in glyphs else ""
+    chevron_hover_url  = _qss_path(glyphs["chevron_hover"]) if "chevron_hover" in glyphs else chevron_url
+    chevron_focus_url  = _qss_path(glyphs["chevron_focus"]) if "chevron_focus" in glyphs else chevron_url
 
-    check_img   = f"image: url({check_url});"   if check_url   else ""
-    minus_img   = f"image: url({minus_url});"   if minus_url   else ""
+    check_img         = f"image: url({check_url});"         if check_url         else ""
+    minus_img         = f"image: url({minus_url});"         if minus_url         else ""
+    chevron_img       = f"image: url({chevron_url});"       if chevron_url       else ""
+    chevron_hover_img = f"image: url({chevron_hover_url});" if chevron_hover_url else ""
+    chevron_focus_img = f"image: url({chevron_focus_url});" if chevron_focus_url else ""
 
     return f"""
 * {{
@@ -963,6 +976,17 @@ QComboBox::drop-down {{
     border: none;
     width: 22px;
     margin-right: 2px;
+}}
+QComboBox::down-arrow {{
+    {chevron_img}
+    width: 12px;
+    height: 12px;
+}}
+QComboBox:hover::down-arrow {{
+    {chevron_hover_img}
+}}
+QComboBox:focus::down-arrow, QComboBox::down-arrow:on {{
+    {chevron_focus_img}
 }}
 QComboBox QAbstractItemView {{
     background: {t.mantle};

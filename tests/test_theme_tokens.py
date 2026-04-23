@@ -146,6 +146,17 @@ class GlyphCacheTests(unittest.TestCase):
                 self.assertIn("check_minus", glyphs)
                 self.assertTrue(glyphs["check_minus"].exists())
 
+    def test_apply_app_theme_writes_chevron_glyphs_for_every_theme(self) -> None:
+        # Same story for QComboBox::down-arrow — three tints per theme.
+        for theme_id in THEMES:
+            with self.subTest(theme=theme_id):
+                apply_app_theme(self._app, theme_id)
+                glyphs = ensure_glyph_assets(theme_id)
+                for key in ("chevron", "chevron_hover", "chevron_focus"):
+                    self.assertIn(key, glyphs)
+                    self.assertTrue(glyphs[key].exists())
+                    self.assertGreater(glyphs[key].stat().st_size, 0)
+
     def test_glyph_cache_is_reused_between_calls(self) -> None:
         # Second call must not re-bake: mtime stable for an existing file.
         apply_app_theme(self._app, "mocha")
