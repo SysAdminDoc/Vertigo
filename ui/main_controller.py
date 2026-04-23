@@ -136,8 +136,12 @@ class MainController(QObject):
         Called from MainWindow.closeEvent so the GUI process can exit
         cleanly even when a long-running encode or transcribe is in
         flight. Scene detection is fire-and-forget and is not cancelled
-        by cancel_active(), so we stop it here explicitly.
+        by cancel_active(), so we stop it here explicitly. Workers that
+        fail to finish within the timeout are surfaced on stderr so a
+        packaging build leaves breadcrumbs in ``crash.log``.
         """
+        import sys
+
         self.cancel_active()
         if self.scene_worker is not None and self.scene_worker.isRunning():
             self.scene_worker.cancel()
@@ -147,8 +151,33 @@ class MainController(QObject):
             self.subtitle_worker,
             self.scene_worker,
         ):
-            if worker is not None and worker.isRunning():
-                worker.wait(timeout_ms)
+            if worker is None or not worker.isRunning():
+                continue
+            if not worker.wait(timeout_ms):
+                try:
+                    print(
+                        f"[Vertigo] Warning: {type(worker).__name__} did not "
+                        f"finish within {timeout_ms}ms on shutdown",
+                        file=sys.stderr,
+                    )
+                except Exception:
+                    pass
+
+    def drop_clip_subs(self, entry_id: int) -> None:
+        """Release per-clip subtitle state for a removed queue entry.
+
+        The transcribe worker writes an auto-generated SRT/ASS into the
+        clip's parent directory; when the user removes the clip from the
+        queue we should delete that file and forget the mapping to avoid
+        leaking disk state across sessions.
+        """
+        path = self.clip_subs.pop(entry_id, None)
+        if path is None:
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     # --------------------------------------------------------------- captions
     def on_subs_cleared(self) -> None:

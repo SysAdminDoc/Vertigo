@@ -6,6 +6,7 @@ it for preview; the queue driver in MainWindow runs them in order.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -57,19 +58,18 @@ def _status_color(status: QueueStatus) -> str:
     }[status]
 
 
+# Monotonically-increasing queue-entry IDs. ``itertools.count`` hands out
+# thread-safe increments (GIL-atomic under CPython) and avoids the module-
+# global mutable state the previous ``_next_id()`` helper relied on.
+_id_sequence = itertools.count(1)
+
+
 @dataclass
 class QueueEntry:
     path: Path
     status: QueueStatus = QueueStatus.PENDING
     message: str = ""
-    id: int = field(default_factory=lambda: _next_id())
-
-
-_id_counter = 0
-def _next_id() -> int:
-    global _id_counter
-    _id_counter += 1
-    return _id_counter
+    id: int = field(default_factory=lambda: next(_id_sequence))
 
 
 class QueueItem(QFrame):

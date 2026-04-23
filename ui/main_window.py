@@ -904,7 +904,11 @@ class MainWindow(QMainWindow):
             if first_id is None:
                 first_id = entry.id
         self._refresh_queue_count()
-        self._toast.show_toast(f"Queued {len(paths)} clips", kind="success")
+        n = len(paths)
+        self._toast.show_toast(
+            f"Queued {n} clip{'' if n == 1 else 's'}",
+            kind="success",
+        )
         if first_id is not None:
             self._queue.select(first_id)
 
@@ -980,6 +984,10 @@ class MainWindow(QMainWindow):
         self._meta_label.setText(elided)
 
     def _on_queue_removed(self, entry_id: int) -> None:
+        # Free the per-clip SRT/ASS the transcribe worker wrote for this
+        # entry, if any — the file isn't useful without the source clip
+        # in the queue and the dict entry would otherwise leak.
+        self._ctl.drop_clip_subs(entry_id)
         self._refresh_queue_count()
         if self._current_entry and self._current_entry.id == entry_id:
             entries = self._queue.entries()

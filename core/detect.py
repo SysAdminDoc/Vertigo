@@ -31,6 +31,13 @@ class TrackPoint:
     confidence: float
 
 
+# Sentinel state values for the lazy MediaPipe detector. Using typed
+# constants (rather than ``False`` as an ad-hoc third value) avoids the
+# is-a-bool-vs-is-an-object confusion the previous implementation had.
+_MP_UNINITIALIZED = "uninitialized"
+_MP_DISABLED = "disabled"
+
+
 class FaceTracker:
     """Samples the video, runs MediaPipe face detection per frame,
     returns a smoothed track of horizontal subject positions over time.
@@ -41,8 +48,12 @@ class FaceTracker:
     def __init__(self, sample_fps: float = 2.0, smoothing: float = 0.6) -> None:
         self.sample_fps = max(0.25, sample_fps)
         self.smoothing = min(max(smoothing, 0.0), 0.95)
-        self._mp_detector = None
-        self._haar = None
+        # Tri-state: UNINITIALIZED → real object → DISABLED (permanently off).
+        # Keeping it as a typed string sentinel (not None / False) makes the
+        # hot-path check readable and prevents the accidental "try again on
+        # every frame" loop that happened when DISABLED was stored as False.
+        self._mp_detector_state: str | object = _MP_UNINITIALIZED
+        self._haar: cv2.CascadeClassifier | None = None
 
     def track(
         self,
@@ -73,6 +84,14 @@ class FaceTracker:
                     break
 
                 h, w = frame.shape[:2]
+                # Guard against 0-width frames from corrupted streams; the
+                # downstream normalization would divide by `w`.
+                if w <= 0 or h <= 0:
+                    frame_idx += step_frames
+                    if total_frames and frame_idx >= total_frames:
+                        break
+                    continue
+
                 x_norm, conf = self._detect_center(frame, w, h)
                 t = frame_idx / src_fps if src_fps else 0.0
 
@@ -139,6 +158,12 @@ class FaceTracker:
                     break
 
                 h, w = frame.shape[:2]
+                if w <= 0 or h <= 0:
+                    frame_idx += step_frames
+                    if total_frames and frame_idx >= total_frames:
+                        break
+                    continue
+
                 if src_w is None:
                     src_w = w
                     crop_w_px = max(1.0, float(crop_width_frac) * w)
@@ -206,18 +231,38 @@ class FaceTracker:
         return float(cx), float(conf)
 
     def _mediapipe_boxes(self, frame: np.ndarray, w: int, h: int):
-        try:
-            if self._mp_detector is None:
+        # Fast path: detector has been permanently disabled (import failed
+        # or first process() raised). Skip without touching mediapipe so
+        # every subsequent frame costs O(1) instead of re-entering the
+        # try/except on each call.
+        if self._mp_detector_state is _MP_DISABLED:
+            return []
+
+        if self._mp_detector_state is _MP_UNINITIALIZED:
+            try:
                 import mediapipe as mp
-                self._mp_detector = mp.solutions.face_detection.FaceDetection(
+                self._mp_detector_state = mp.solutions.face_detection.FaceDetection(
                     model_selection=1,
                     min_detection_confidence=0.5,
                 )
+            except Exception:
+                self._mp_detector_state = _MP_DISABLED
+                return []
+
+        detector = self._mp_detector_state
+        try:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            result = self._mp_detector.process(rgb)
+            result = detector.process(rgb)
         except Exception:
-            self._mp_detector = False  # sentinel: disabled
+            # Runtime failure — disable for the rest of this session so we
+            # don't burn cycles retrying the same broken call.
+            self._mp_detector_state = _MP_DISABLED
+            try:
+                detector.close()
+            except Exception:
+                pass
             return []
+
         if not result or not result.detections:
             return []
         out = []
@@ -242,9 +287,11 @@ class FaceTracker:
         return [(float(x), float(y), float(bw), float(bh), 0.5) for (x, y, bw, bh) in faces]
 
     def close(self) -> None:
-        if self._mp_detector and self._mp_detector is not False:
-            try:
-                self._mp_detector.close()
-            except Exception:
-                pass
-            self._mp_detector = None
+        detector = self._mp_detector_state
+        if detector is _MP_UNINITIALIZED or detector is _MP_DISABLED:
+            return
+        try:
+            detector.close()
+        except Exception:
+            pass
+        self._mp_detector_state = _MP_DISABLED

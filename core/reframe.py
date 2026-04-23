@@ -22,6 +22,16 @@ from .presets import Preset
 from .probe import VideoInfo
 
 
+# Hard ceiling on how many keyframes go into the FFmpeg crop-x expression.
+# libavfilter parses the nested ``if(between(t,...))`` chain recursively;
+# 512 levels deep on a release build is well within the safe zone across
+# the FFmpeg versions we bundle (tested 4.4 → 7.1), and 128 keyframes is
+# plenty for smooth pans over a long clip. Higher counts get strided
+# down — we lose nothing in visual quality because the Savitzky-Golay
+# pass has already low-passed the series.
+_MAX_TRACK_EXPR_POINTS = 128
+
+
 @dataclass
 class Adjustments:
     brightness: float = 0.0   # -1.0 .. 1.0
@@ -108,7 +118,17 @@ def _crop_dims(info: VideoInfo, target_w: int, target_h: int) -> tuple[int, int]
     """Return (crop_w, crop_h) in source pixels that match target aspect.
     We keep the full source height and crop width; if source is taller than
     target aspect, we crop height instead.
+
+    Guards all four inputs so a malformed preset or a corrupt probe can't
+    raise ZeroDivisionError inside the export pipeline. On bad input we
+    fall back to the source dimensions (no crop) which is a safe no-op.
     """
+    if target_w <= 0 or target_h <= 0 or info.width <= 0 or info.height <= 0:
+        w = max(2, info.width)
+        h = max(2, info.height)
+        # keep even dimensions for yuv420p downstream
+        return w - w % 2, h - h % 2
+
     target_aspect = target_w / target_h
     src_aspect = info.width / info.height
     if src_aspect >= target_aspect:
@@ -119,6 +139,9 @@ def _crop_dims(info: VideoInfo, target_w: int, target_h: int) -> tuple[int, int]
         crop_w = info.width
         crop_h = int(round(info.width / target_aspect))
         crop_h -= crop_h % 2
+    # Final clamp: never return < 2 (FFmpeg rejects 0-area crops).
+    crop_w = max(2, crop_w)
+    crop_h = max(2, crop_h)
     return crop_w, crop_h
 
 
@@ -199,6 +222,7 @@ def _plan_track(
     max_x = max(0, info.width - cw)
     pts = sorted(clean, key=lambda p: p.t)
     pts = _smooth_track(pts, source_fps=info.fps)
+    pts = _stride_for_expression(pts, _MAX_TRACK_EXPR_POINTS)
     expr = _x_expression(pts, cw, info.width, max_x)
     vf = (
         f"crop={cw}:{ch}:'{expr}':(ih-{ch})/2,"
@@ -243,6 +267,35 @@ def _smooth_track(points: list, source_fps: float) -> list:
         TrackPoint(t=p.t, x=float(sx), confidence=p.confidence)
         for p, sx in zip(points, smoothed)
     ]
+
+
+def _stride_for_expression(points: list, limit: int) -> list:
+    """Downsample ``points`` to at most ``limit`` entries, preserving the
+    first and last keyframes exactly.
+
+    libavfilter parses the generated ``if()`` chain recursively, and a
+    very long clip with a 2 fps track can produce 600+ points — enough
+    to trigger expression-parser stack issues on some FFmpeg builds.
+    Striding evenly keeps the start / end pose exact and trims the middle
+    where smoothing has already flattened short-term variation.
+    """
+    n = len(points)
+    if n <= limit or limit <= 2:
+        return points
+    # Pick ``limit`` indices spread evenly across [0, n-1]; round to the
+    # nearest int so we don't truncate toward 0.
+    step = (n - 1) / (limit - 1)
+    kept: list = []
+    last_idx = -1
+    for i in range(limit):
+        idx = int(round(i * step))
+        if idx != last_idx:
+            kept.append(points[idx])
+            last_idx = idx
+    # Guarantee the last point is included even when rounding lands short.
+    if kept[-1] is not points[-1]:
+        kept.append(points[-1])
+    return kept
 
 
 def _scene_clamp(pts: list, scenes: list[tuple[float, float]]) -> list:

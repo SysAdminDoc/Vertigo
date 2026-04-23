@@ -4,6 +4,13 @@ When `crop_width_frac` is provided, uses the cameraman-driven pipeline
 (`SpeakerTracker` + `SmoothedCameraman`) for multi-face, speaker-sticky
 viewport motion. Without it, falls back to the legacy single-largest-
 face-per-frame path so callers with no clip geometry still get a track.
+
+Cancel contract (matches SubtitleWorker):
+    * ``cancel()`` sets a flag polled by the tracker's cancel_cb.
+    * On cancel, we emit ``failed("Cancelled.")`` rather than
+      ``finished_ok(partial_points)`` — the main window treats
+      finished_ok as an authoritative track and would pass the
+      half-finished data to the export pipeline.
 """
 
 from __future__ import annotations
@@ -54,8 +61,16 @@ class DetectWorker(QThread):
                     progress_cb=self.progress.emit,
                     cancel_cb=lambda: self._cancel,
                 )
+            if self._cancel:
+                self.failed.emit("Cancelled.")
+                return
             self.finished_ok.emit(points)
         except Exception as e:
-            self.failed.emit(f"{type(e).__name__}: {e}")
+            if self._cancel:
+                # A cancel racing with a tracker-internal exception should
+                # still surface as "Cancelled" so the UI reset path runs.
+                self.failed.emit("Cancelled.")
+            else:
+                self.failed.emit(f"{type(e).__name__}: {e}")
         finally:
             tracker.close()

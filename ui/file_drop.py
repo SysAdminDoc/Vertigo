@@ -69,7 +69,16 @@ class FileDropZone(QWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:
         self._set_hover(False)
-        paths = [u.toLocalFile() for u in event.mimeData().urls() if _is_video(u.toLocalFile())]
+        # Keep only readable video files. An extension-only check would
+        # let through dead symlinks or paths on an unmounted drive; the
+        # subsequent probe() in the main window would then surface a
+        # generic error toast. Catching it here means a bad drop is a
+        # quiet no-op, matching the platform convention for drag-drop.
+        paths: list[str] = []
+        for u in event.mimeData().urls():
+            local = u.toLocalFile()
+            if _is_video(local) and Path(local).is_file():
+                paths.append(local)
         if not paths:
             event.ignore()
             return

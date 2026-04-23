@@ -29,6 +29,12 @@ _PROGRESS_RE = re.compile(
     r"(?:time=|out_time=)(\d+):(\d+):(\d+(?:\.\d+)?)"
 )
 
+# How long to wait for a cooperative ``terminate()`` before escalating to
+# ``kill()``. FFmpeg normally responds to SIGTERM by finalising the output
+# (flush + trailer) within a second or two; after this budget we give up
+# on a clean output file rather than hanging the app.
+_TERMINATE_TIMEOUT_SEC = 3.0
+
 
 def ffmpeg_bin() -> str:
     bin_path = shutil.which("ffmpeg")
@@ -105,7 +111,15 @@ class EncodeJob:
 
 
 def run(job: EncodeJob, on_progress=None, on_log=None, cancel_cb=None) -> int:
-    """Run the encode. Returns FFmpeg exit code."""
+    """Run the encode. Returns FFmpeg exit code.
+
+    Cancel contract:
+        ``cancel_cb`` is polled on every stderr line. When it flips True
+        we issue ``proc.terminate()``, then ``wait(timeout)``, and finally
+        ``proc.kill()`` if FFmpeg doesn't cooperate. This guarantees the
+        call returns promptly; stuck FFmpeg subprocesses never outlive
+        this function.
+    """
     job.out_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = job.build_command()
@@ -125,6 +139,7 @@ def run(job: EncodeJob, on_progress=None, on_log=None, cancel_cb=None) -> int:
         bufsize=1,
         creationflags=_no_window_flags(),
     )
+    cancelled = False
     try:
         assert proc.stderr is not None
         for line in proc.stderr:
@@ -132,7 +147,8 @@ def run(job: EncodeJob, on_progress=None, on_log=None, cancel_cb=None) -> int:
             if not line:
                 continue
             if cancel_cb and cancel_cb():
-                proc.terminate()
+                cancelled = True
+                _terminate(proc)
                 break
             if on_log:
                 on_log(line)
@@ -143,7 +159,7 @@ def run(job: EncodeJob, on_progress=None, on_log=None, cancel_cb=None) -> int:
                     t = int(h) * 3600 + int(mnt) * 60 + float(sec)
                     on_progress(min(1.0, t / duration))
     finally:
-        rc = proc.wait()
+        rc = _reap(proc, cancelled)
 
     if on_progress:
         on_progress(1.0)
@@ -152,6 +168,45 @@ def run(job: EncodeJob, on_progress=None, on_log=None, cancel_cb=None) -> int:
 
 # ---------------------------------------------------------- helpers
 
+def _terminate(proc: subprocess.Popen) -> None:
+    """Ask FFmpeg to stop. Idempotent — safe to call twice."""
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+
+
+def _reap(proc: subprocess.Popen, cancelled: bool) -> int:
+    """Wait for the subprocess to exit, escalating to kill on timeout.
+
+    Returns the final exit code. On cancel we force a non-zero return so
+    the worker can distinguish cancelled-but-exited from successful exit.
+    """
+    try:
+        if cancelled:
+            # First give FFmpeg a chance to finalise cleanly.
+            try:
+                return proc.wait(timeout=_TERMINATE_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    return proc.wait(timeout=_TERMINATE_TIMEOUT_SEC)
+                except subprocess.TimeoutExpired:
+                    # Still stuck — abandon. Callers treat non-zero as
+                    # failure; the zombie will be reaped by the OS when
+                    # the app exits.
+                    return -1
+        return proc.wait()
+    finally:
+        # Close the stderr pipe to free its read end. Some platforms
+        # keep the file descriptor alive until this is done.
+        try:
+            if proc.stderr is not None:
+                proc.stderr.close()
+        except Exception:
+            pass
+
+
 def _duration(job: EncodeJob) -> float:
     if job.trim_end is not None:
         return max(0.0, job.trim_end - job.trim_start)
@@ -159,26 +214,43 @@ def _duration(job: EncodeJob) -> float:
 
 
 def _double_bitrate(rate: str) -> str:
-    if rate.endswith("M"):
-        return f"{int(float(rate[:-1]) * 2)}M"
-    if rate.endswith("k"):
-        return f"{int(float(rate[:-1]) * 2)}k"
+    """Return the buffer-bitrate that pairs with `-b:v`. Falls through on
+    unexpected input instead of raising, so a preset with a non-standard
+    unit never breaks the encode command.
+    """
+    try:
+        if rate.endswith("M"):
+            return f"{int(float(rate[:-1]) * 2)}M"
+        if rate.endswith("k"):
+            return f"{int(float(rate[:-1]) * 2)}k"
+    except (ValueError, IndexError):
+        pass
     return rate
 
 
 def _subtitles_filter(srt_path: Path, preset: CaptionPreset, out_height: int) -> str:
     """Build an FFmpeg `subtitles=` filter for burn-in.
 
-    FFmpeg is fussy about path escaping on Windows — single-quote the path,
-    convert backslashes to forward slashes, escape the drive colon with \\:.
+    FFmpeg's filter-graph parser is fussy about path escaping:
+      * the whole argument is inside a filter-graph so every ``\\`` gets
+        consumed once by the graph parser and once by the filter itself;
+      * single-quoted filenames must escape embedded quotes as ``'\\''``
+        (close quote, escaped literal quote, reopen quote);
+      * on Windows the drive colon needs an additional ``\\:`` or the
+        parser splits the path at the ``D:`` boundary.
 
-    The `force_style=` block is generated from a resolution-relative
-    `CaptionPreset` so the same preset renders correctly on 1080p,
+    The ``force_style=`` block is generated from a resolution-relative
+    ``CaptionPreset`` so the same preset renders correctly on 1080p,
     720p, 4K, etc.
     """
     s = str(srt_path.resolve()).replace("\\", "/")
+    # Escape the Windows drive colon ("C:/foo" -> "C\:/foo") so libavfilter
+    # doesn't split the filter argument at the colon.
     if len(s) > 1 and s[1] == ":":
         s = s[0] + r"\:" + s[2:]
+    # Escape single quotes inside the filename so they don't close our
+    # wrapping quote. The FFmpeg-documented idiom is 'abc'\''def'.
+    s = s.replace("'", r"'\''")
     style = force_style_string(preset, out_height)
     return f"subtitles='{s}':force_style='{style}'"
 

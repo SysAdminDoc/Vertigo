@@ -120,9 +120,16 @@ def _extract_pcm(path: Path, *, window_sec: float) -> bytes:
 
 
 def _decode_mono_s16le(raw: bytes) -> list[int]:
+    """Decode an s16le byte stream into a list of signed 16-bit samples.
+
+    An odd-length buffer drops the trailing byte — libavcodec's s16le
+    pipe output should never emit a partial sample (each sample is two
+    bytes, aligned at the container edge) so this branch is effectively
+    defensive: we prefer losing a half-sample over raising in the
+    analysis path.
+    """
     if not raw:
         return []
-    # "<{n}h" — little-endian signed 16-bit
     n = len(raw) // 2
     if n == 0:
         return []
@@ -133,12 +140,10 @@ def _decode_mono_s16le(raw: bytes) -> list[int]:
 
 def _analyse(samples: list[int], *, sample_rate: int) -> tuple[float, float]:
     """Return (voice_fraction, mean_voiced_energy), both 0–1."""
-    if not samples:
+    if not samples or sample_rate <= 0:
         return 0.0, 0.0
 
     frame_len = max(1, int(sample_rate * 0.020))  # 20 ms frames
-    if frame_len <= 0:
-        return 0.0, 0.0
 
     total_frames = len(samples) // frame_len
     if total_frames == 0:
