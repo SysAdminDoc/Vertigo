@@ -386,13 +386,13 @@ QComboBox#themePicker:focus {{
 QWidget#glassPanel, QFrame#glassPanel {{
     background: {t.mantle};
     border: 1px solid {t.surface0};
-    border-radius: 14px;
+    border-radius: 16px;
 }}
 
 QWidget#heroPanel, QFrame#heroPanel {{
     background: {t.mantle};
     border: 1px solid {t.surface0};
-    border-radius: 18px;
+    border-radius: 20px;
 }}
 
 QWidget#emptyState {{
@@ -465,13 +465,33 @@ QLabel#emptyBody {{
 /* ------------------------------------------------------------- pills & notices */
 
 QLabel#statusPill {{
-    background: {t.surface0};
+    background: {t.base};
     color: {t.subtext1};
     border: 1px solid {t.surface0};
     border-radius: 999px;
     padding: 5px 12px;
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
+}}
+QLabel#statusPill[tone="accent"] {{
+    color: {t.accent};
+    border-color: {t.accent};
+    background: {t.accent_muted};
+}}
+QLabel#statusPill[tone="success"] {{
+    color: {t.green};
+    border-color: {t.green};
+    background: {t.green_soft};
+}}
+QLabel#statusPill[tone="warning"] {{
+    color: {t.yellow};
+    border-color: {t.yellow};
+    background: {t.yellow_soft};
+}}
+QLabel#statusPill[tone="error"] {{
+    color: {t.red};
+    border-color: {t.red};
+    background: {t.red_soft};
 }}
 
 QLabel#inlineNotice {{
@@ -493,6 +513,11 @@ QLabel#inlineNotice[tone="success"] {{
     border-color: {t.green};
     background: {t.green_soft};
 }}
+QLabel#inlineNotice[tone="accent"] {{
+    color: {t.accent};
+    border-color: {t.accent};
+    background: {t.accent_muted};
+}}
 
 /* ------------------------------------------------------------- buttons */
 
@@ -513,8 +538,6 @@ QPushButton#primaryBtn:hover {{
 QPushButton#primaryBtn:pressed {{
     background: {t.accent_soft};
     border-color: {t.accent_soft};
-    padding-top: 12px;
-    padding-bottom: 10px;
 }}
 QPushButton#primaryBtn:focus {{
     border-color: {t.focus};
@@ -686,8 +709,8 @@ QSlider:focus::handle:horizontal {{
 QProgressBar {{
     background: {t.surface0};
     border: none;
-    border-radius: 4px;
-    height: 6px;
+    border-radius: 5px;
+    height: 8px;
     text-align: center;
     color: {t.subtext0};
     font-size: 10px;
@@ -696,7 +719,7 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{
     background: {t.accent};
-    border-radius: 4px;
+    border-radius: 5px;
 }}
 
 /* ------------------------------------------------------------- log */
@@ -867,9 +890,9 @@ QHeaderView::section {{
 
 QTabWidget#sideTabs::pane {{
     border: 1px solid {t.surface0};
-    border-radius: 14px;
+    border-radius: 16px;
     background: {t.mantle};
-    top: -1px;
+    top: 0;
 }}
 QTabWidget#sideTabs QTabBar {{
     qproperty-drawBase: 0;
@@ -877,22 +900,26 @@ QTabWidget#sideTabs QTabBar {{
 QTabWidget#sideTabs QTabBar::tab {{
     background: transparent;
     color: {t.overlay2};
-    padding: 10px 14px;
-    margin-right: 2px;
-    border: none;
+    padding: 9px 12px;
+    margin: 6px 4px 0 0;
+    border: 1px solid transparent;
+    border-radius: 10px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.2px;
 }}
 QTabWidget#sideTabs QTabBar::tab:hover {{
     color: {t.subtext1};
+    background: {t.accent_hover};
 }}
 QTabWidget#sideTabs QTabBar::tab:selected {{
     color: {t.text};
-    border-bottom: 2px solid {t.accent};
+    border-color: {t.surface1};
+    background: {t.accent_muted};
 }}
 QTabWidget#sideTabs QTabBar::tab:focus {{
     color: {t.text};
+    border-color: {t.focus};
 }}
 
 /* ------------------------------------------------------------- splitter */

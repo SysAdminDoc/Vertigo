@@ -243,7 +243,9 @@ class VideoPlayer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.canvas = PreviewCanvas(self)
+        self.canvas.setFocusProxy(self)
         self._sink = QVideoSink(self)
         self._sink.videoFrameChanged.connect(self.canvas.push_frame)
 
@@ -260,15 +262,19 @@ class VideoPlayer(QWidget):
         self._play_btn.setFixedWidth(48)
         self._play_btn.setEnabled(False)
         self._play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._play_btn.setToolTip("Play preview")
+        self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
         self._play_btn.clicked.connect(self.toggle_play)
 
         self._time = QLabel("0:00 / 0:00")
-        self._time.setObjectName("valueMuted")
+        self._time.setObjectName("statusPill")
 
         self._trim_label = QLabel("Trim: 0:00 \u2013 0:00")
-        self._trim_label.setObjectName("valueMuted")
+        self._trim_label.setObjectName("subtitle")
+
+        self._trim_hint = QLabel("Load a clip to scrub, trim in and out points, and snap to scene cuts.")
+        self._trim_hint.setObjectName("valueMuted")
+        self._trim_hint.setWordWrap(True)
 
         self._scrubber = RangeSlider()
         self._scrubber.playhead_seek.connect(
@@ -288,6 +294,7 @@ class VideoPlayer(QWidget):
         lay.addWidget(self.canvas, 1)
         lay.addLayout(transport)
         lay.addWidget(self._trim_label)
+        lay.addWidget(self._trim_hint)
 
     # public API -------------------------------------------------------
     def load(self, path: Path) -> None:
@@ -298,8 +305,12 @@ class VideoPlayer(QWidget):
         self._loaded = True
         self._play_btn.setEnabled(True)
         self._play_btn.setText("\u25b6")
-        self._play_btn.setToolTip("Play preview")
+        self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
+        self._time.setProperty("tone", "accent")
+        self._time.style().unpolish(self._time)
+        self._time.style().polish(self._time)
+        self._trim_hint.setText("Press Space to play or pause. Click the timeline to scrub, and drag the trim handles to set in and out points.")
 
     def toggle_play(self) -> None:
         if not self._loaded:
@@ -307,13 +318,17 @@ class VideoPlayer(QWidget):
         if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._player.pause()
             self._play_btn.setText("\u25b6")
-            self._play_btn.setToolTip("Play preview")
+            self._play_btn.setToolTip("Play preview (Space)")
             self._play_btn.setAccessibleName("Play preview")
+            self._time.setProperty("tone", "accent")
         else:
             self._player.play()
             self._play_btn.setText("\u2759\u2759")
-            self._play_btn.setToolTip("Pause preview")
+            self._play_btn.setToolTip("Pause preview (Space)")
             self._play_btn.setAccessibleName("Pause preview")
+            self._time.setProperty("tone", "success")
+        self._time.style().unpolish(self._time)
+        self._time.style().polish(self._time)
 
     def stop(self) -> None:
         self._player.stop()
@@ -326,10 +341,32 @@ class VideoPlayer(QWidget):
         self._loaded = False
         self._play_btn.setText("\u25b6")
         self._play_btn.setEnabled(False)
-        self._play_btn.setToolTip("Play preview")
+        self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
         self._time.setText("0:00 / 0:00")
+        self._time.setProperty("tone", None)
+        self._time.style().unpolish(self._time)
+        self._time.style().polish(self._time)
         self._update_trim_label(0.0, 0.0)
+        self._trim_hint.setText("Load a clip to scrub, trim in and out points, and snap to scene cuts.")
+
+    def keyPressEvent(self, event) -> None:
+        if not self._loaded:
+            super().keyPressEvent(event)
+            return
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_K):
+            self.toggle_play()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_J:
+            self._player.setPosition(max(0, self._player.position() - 5000))
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_L:
+            self._player.setPosition(min(self._player.duration(), self._player.position() + 5000))
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def set_aspect(self, w: int, h: int) -> None:
         self.canvas.set_aspect(w, h)

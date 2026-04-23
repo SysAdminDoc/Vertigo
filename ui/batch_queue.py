@@ -38,6 +38,15 @@ _GLYPH = {
     QueueStatus.DONE:    "\u2713",
     QueueStatus.FAILED:  "\u2715",
 }
+
+_STATUS_LABEL = {
+    QueueStatus.PENDING: "Queued",
+    QueueStatus.ACTIVE: "Working",
+    QueueStatus.DONE: "Done",
+    QueueStatus.FAILED: "Needs review",
+}
+
+
 def _status_color(status: QueueStatus) -> str:
     theme = current_palette()
     return {
@@ -71,7 +80,7 @@ class QueueItem(QFrame):
         super().__init__(parent)
         self.entry = entry
         self.setObjectName("queueItem")
-        self.setFixedHeight(60)
+        self.setFixedHeight(72)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(str(entry.path))
@@ -80,22 +89,29 @@ class QueueItem(QFrame):
         self._apply_style()
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 10, 8)
+        lay.setContentsMargins(14, 10, 12, 10)
         lay.setSpacing(12)
 
         self._status_icon = QLabel(_GLYPH[entry.status])
-        self._status_icon.setFixedWidth(20)
-        lay.addWidget(self._status_icon)
+        self._status_icon.setFixedWidth(14)
+        lay.addWidget(self._status_icon, 0, Qt.AlignmentFlag.AlignTop)
 
         col = QVBoxLayout()
-        col.setSpacing(1)
+        col.setSpacing(2)
         self._name = QLabel(entry.path.name)
-        self._name.setMaximumWidth(260)
+        self._name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self._name.setToolTip(str(entry.path))
-        self._sub = QLabel(entry.message or "queued")
+        self._sub = QLabel(entry.message or "Ready when you are")
+        self._sub.setWordWrap(True)
         col.addWidget(self._name)
         col.addWidget(self._sub)
         lay.addLayout(col, 1)
+
+        self._status_badge = QLabel("")
+        self._status_badge.setObjectName("statusPill")
+        self._status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_badge.setMinimumWidth(92)
+        lay.addWidget(self._status_badge, 0, Qt.AlignmentFlag.AlignTop)
 
         self._rm_btn = QPushButton("\u2715")
         self._rm_btn.setFlat(True)
@@ -111,7 +127,7 @@ class QueueItem(QFrame):
     def update_entry(self, entry: QueueEntry) -> None:
         self.entry = entry
         self._status_icon.setText(_GLYPH[entry.status])
-        self._sub.setText(entry.message or entry.status.value)
+        self._sub.setText(entry.message or _STATUS_LABEL[entry.status])
         self.setAccessibleDescription(self._sub.text())
         self._sync_remove_enabled()
         self.refresh_theme()
@@ -146,12 +162,12 @@ class QueueItem(QFrame):
         if self._selected:
             self.setStyleSheet(
                 f"QFrame#queueItem {{background: {theme.accent_selected}; "
-                f"border: 1px solid {theme.accent}; border-radius: 10px;}}"
+                f"border: 1px solid {theme.accent}; border-radius: 12px;}}"
             )
         else:
             self.setStyleSheet(
                 f"QFrame#queueItem {{background: {theme.base}; "
-                f"border: 1px solid {theme.surface0}; border-radius: 10px;}}"
+                f"border: 1px solid {theme.surface0}; border-radius: 12px;}}"
                 f"QFrame#queueItem:hover {{border-color: {theme.surface2}; background: {theme.accent_hover};}}"
                 f"QFrame#queueItem:focus {{border-color: {theme.focus};}}"
             )
@@ -159,10 +175,20 @@ class QueueItem(QFrame):
     def refresh_theme(self) -> None:
         theme = current_palette()
         self._status_icon.setStyleSheet(
-            f"color: {_status_color(self.entry.status)}; font-size: 16px; font-weight: 700;"
+            f"color: {_status_color(self.entry.status)}; font-size: 13px; font-weight: 700;"
         )
         self._name.setStyleSheet(f"color: {theme.text}; font-size: 12px; font-weight: 600;")
-        self._sub.setStyleSheet(f"color: {theme.subtext0}; font-size: 10px;")
+        self._sub.setStyleSheet(f"color: {theme.subtext0}; font-size: 10px; line-height: 145%;")
+        tone = {
+            QueueStatus.PENDING: None,
+            QueueStatus.ACTIVE: "accent",
+            QueueStatus.DONE: "success",
+            QueueStatus.FAILED: "error",
+        }[self.entry.status]
+        self._status_badge.setText(_STATUS_LABEL[self.entry.status])
+        self._status_badge.setProperty("tone", tone)
+        self._status_badge.style().unpolish(self._status_badge)
+        self._status_badge.style().polish(self._status_badge)
         self._rm_btn.setStyleSheet(
             f"QPushButton {{background: transparent; color: {theme.overlay0}; border: none; font-size: 12px;}}"
             f"QPushButton:hover {{color: {theme.red};}}"
@@ -197,13 +223,20 @@ class BatchQueue(QWidget):
         empty_title.setObjectName("emptyTitle")
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_body = QLabel(
-            "Drop several clips on the preview to batch-export them with one set of settings."
+            "Drop one clip to start polishing, or drop several to export a whole batch with the same framing, text, and output settings."
         )
         empty_body.setObjectName("emptyBody")
         empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_body.setWordWrap(True)
+        empty_note = QLabel(
+            "Everything in the queue stays in sync with your current preset, reframe mode, captions, and export settings."
+        )
+        empty_note.setObjectName("valueMuted")
+        empty_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_note.setWordWrap(True)
         empty_lay.addWidget(empty_title)
         empty_lay.addWidget(empty_body)
+        empty_lay.addWidget(empty_note)
         empty_lay.addStretch(1)
 
         self._list_host = QWidget()

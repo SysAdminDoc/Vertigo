@@ -38,6 +38,11 @@ class AdjustmentsPanel(QWidget):
         self._add_row(lay, 1, "Contrast",   self._contrast, self._contrast_v)
         self._add_row(lay, 2, "Saturation", self._sat, self._sat_v)
 
+        self._summary = QLabel("")
+        self._summary.setObjectName("valueMuted")
+        self._summary.setWordWrap(True)
+        lay.addWidget(self._summary, 3, 0, 1, 3)
+
         reset_row = QHBoxLayout()
         reset_row.addStretch(1)
         self._reset = QPushButton("Reset")
@@ -46,7 +51,7 @@ class AdjustmentsPanel(QWidget):
         self._reset.setToolTip("Return adjustments to neutral")
         self._reset.clicked.connect(self.reset)
         reset_row.addWidget(self._reset)
-        lay.addLayout(reset_row, 3, 0, 1, 3)
+        lay.addLayout(reset_row, 4, 0, 1, 3)
 
         self._bright.valueChanged.connect(self._recompute)
         self._contrast.valueChanged.connect(self._recompute)
@@ -95,5 +100,12 @@ class AdjustmentsPanel(QWidget):
         self._contrast_v.setText(f"{self._contrast.value():d}%")
         self._sat_v.setText(f"{self._sat.value():d}%")
         neutral = self._bright.value() == 0 and self._contrast.value() == 100 and self._sat.value() == 100
+        if neutral:
+            self._summary.setText("Neutral look. Leave these at default when the source already feels balanced.")
+        else:
+            self._summary.setText(
+                "Current grade: "
+                f"brightness {self._bright.value():+d}%, contrast {self._contrast.value():d}%, saturation {self._sat.value():d}%."
+            )
         self._reset.setEnabled(not neutral)
         self.changed.emit(self._adj)

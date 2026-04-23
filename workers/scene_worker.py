@@ -16,7 +16,7 @@ from core.scenes import detect_scenes
 
 
 class SceneWorker(QThread):
-    finished_ok = pyqtSignal(list)   # list[tuple[float, float]] (start, end)
+    finished_ok = pyqtSignal(str, list)   # path, list[tuple[float, float]] (start, end)
     failed = pyqtSignal(str)
 
     def __init__(self, video_path: Path) -> None:
@@ -32,6 +32,6 @@ class SceneWorker(QThread):
             scenes = detect_scenes(self._path)
             if self._cancel:
                 return
-            self.finished_ok.emit(scenes)
+            self.finished_ok.emit(str(self._path), scenes)
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")

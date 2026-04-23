@@ -18,8 +18,9 @@ from PyQt6.QtGui import (
     QPaintEvent,
     QPen,
 )
-from PyQt6.QtWidgets import QFileDialog, QSizePolicy, QWidget
+from PyQt6.QtWidgets import QSizePolicy, QWidget
 
+from .file_dialogs import get_open_video_paths, remember_import_directory
 from .theme import current_palette, qcolor
 
 
@@ -29,6 +30,7 @@ _VIDEO_EXT = {
 }
 
 _ACCEPTED_LABEL = "MP4  ·  MOV  ·  MKV  ·  WEBM  ·  AVI"
+_WORKFLOW_LABEL = "Import  ·  Reframe  ·  Export"
 
 
 class FileDropZone(QWidget):
@@ -72,6 +74,7 @@ class FileDropZone(QWidget):
             event.ignore()
             return
         event.acceptProposedAction()
+        remember_import_directory(paths[0])
         if len(paths) == 1:
             self.file_dropped.emit(paths[0])
         else:
@@ -89,14 +92,11 @@ class FileDropZone(QWidget):
             return
         super().keyPressEvent(event)
 
+    def browse(self) -> None:
+        self._open_dialog()
+
     def _open_dialog(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Import video(s)",
-            "",
-            "Video files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.flv *.ts *.mpg *.mpeg);;All files (*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
+        paths = get_open_video_paths(self)
         if not paths:
             return
         if len(paths) == 1:
@@ -132,7 +132,7 @@ class FileDropZone(QWidget):
             p.setBrush(QColor(theme.base))
         p.drawRoundedRect(container, 14, 14)
 
-        # Centered composition: 9:16 frame glyph + headline + helper text.
+        # Centered composition: badge + 9:16 frame glyph + headline + helper text.
         cx = container.center().x()
         cy = container.center().y()
 
@@ -141,6 +141,20 @@ class FileDropZone(QWidget):
         glyph_w = glyph_h * 9.0 / 16.0
         glyph_rect = QRectF(cx - glyph_w / 2, cy - glyph_h - 16,
                             glyph_w, glyph_h)
+
+        badge_rect = QRectF(cx - 76, glyph_rect.top() - 42, 152, 24)
+        badge_pen = QPen(qcolor(theme.accent if active else theme.surface1))
+        badge_pen.setWidthF(1.0)
+        p.setPen(badge_pen)
+        p.setBrush(qcolor(theme.accent_muted if active else theme.mantle))
+        p.drawRoundedRect(badge_rect, 12, 12)
+        badge_font = QFont()
+        badge_font.setPointSize(9)
+        badge_font.setWeight(QFont.Weight.DemiBold)
+        badge_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.5)
+        p.setFont(badge_font)
+        p.setPen(QColor(theme.accent if active else theme.subtext1))
+        p.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "Batch-ready import")
 
         accent = QColor(theme.accent)
         if not active:
@@ -166,18 +180,40 @@ class FileDropZone(QWidget):
 
         # Headline
         headline_font = QFont()
-        headline_font.setPointSize(13)
+        headline_font.setPointSize(14)
         headline_font.setWeight(QFont.Weight.DemiBold)
         p.setFont(headline_font)
         p.setPen(QColor(theme.text))
         headline_rect = QRect(
             int(container.left()),
-            int(cy + 10),
+            int(cy + 8),
             int(container.width()),
-            26,
+            28,
         )
-        headline = "Release to add clips" if self._hover else "Drop videos here to begin"
+        headline = "Release to queue your clips" if self._hover else "Drop clips to build a vertical cut"
         p.drawText(headline_rect, Qt.AlignmentFlag.AlignHCenter, headline)
+
+        body_font = QFont()
+        body_font.setPointSize(10)
+        body_font.setWeight(QFont.Weight.Normal)
+        p.setFont(body_font)
+        p.setPen(QColor(theme.subtext0))
+        body_rect = QRect(
+            int(container.left() + 48),
+            int(cy + 38),
+            int(container.width() - 96),
+            42,
+        )
+        body = (
+            "Vertigo keeps your live preview, trim, captions, and export queue in sync."
+            if self._hover
+            else "Import one source clip for a focused pass, or drop several and batch-export them with the same polished setup."
+        )
+        p.drawText(
+            body_rect,
+            int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap),
+            body,
+        )
 
         # Helper: click + shortcut + formats
         helper_font = QFont()
@@ -187,35 +223,51 @@ class FileDropZone(QWidget):
         p.setPen(QColor(theme.subtext0))
         helper_rect = QRect(
             int(container.left()),
-            int(cy + 36),
+            int(cy + 86),
             int(container.width()),
             20,
         )
         helper = (
-            "Accepted formats  ·  " + _ACCEPTED_LABEL
+            "Release to add everything to the queue"
             if self._hover
-            else "Click anywhere to browse  ·  Enter to open dialog"
+            else "Click anywhere to browse  ·  Press Enter to open the file picker"
         )
         p.drawText(helper_rect, Qt.AlignmentFlag.AlignHCenter, helper)
 
+        workflow_font = QFont()
+        workflow_font.setPointSize(9)
+        workflow_font.setWeight(QFont.Weight.DemiBold)
+        workflow_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
+        p.setFont(workflow_font)
+        p.setPen(QColor(theme.overlay1))
+        p.drawText(
+            QRect(
+                int(container.left()),
+                int(container.bottom() - 52),
+                int(container.width()),
+                18,
+            ),
+            Qt.AlignmentFlag.AlignHCenter,
+            _WORKFLOW_LABEL,
+        )
+
         # Format list as a faint caption at the bottom
-        if not self._hover:
-            caption_font = QFont()
-            caption_font.setPointSize(9)
-            caption_font.setWeight(QFont.Weight.Normal)
-            caption_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
-            p.setFont(caption_font)
-            p.setPen(QColor(theme.overlay1))
-            p.drawText(
-                QRect(
-                    int(container.left()),
-                    int(container.bottom() - 28),
-                    int(container.width()),
-                    20,
-                ),
-                Qt.AlignmentFlag.AlignHCenter,
-                _ACCEPTED_LABEL,
-            )
+        caption_font = QFont()
+        caption_font.setPointSize(9)
+        caption_font.setWeight(QFont.Weight.Normal)
+        caption_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
+        p.setFont(caption_font)
+        p.setPen(QColor(theme.overlay1))
+        p.drawText(
+            QRect(
+                int(container.left()),
+                int(container.bottom() - 28),
+                int(container.width()),
+                20,
+            ),
+            Qt.AlignmentFlag.AlignHCenter,
+            _ACCEPTED_LABEL,
+        )
 
         p.end()
 

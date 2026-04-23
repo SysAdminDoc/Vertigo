@@ -57,6 +57,8 @@ def ffmpeg_encoders() -> frozenset[str]:
             [bin_path, "-hide_banner", "-encoders"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             creationflags=_no_window_flags(),
         )

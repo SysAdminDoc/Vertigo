@@ -180,6 +180,56 @@ class OverlayRow(QFrame):
 
 class OverlaysPanel(QWidget):
     overlays_changed = pyqtSignal(list)  # list[TextOverlay]
+    _PRESET_LIBRARY: dict[str, tuple[str, TextOverlay]] = {
+        "intro": (
+            "Intro title",
+            TextOverlay(
+                text="Title",
+                start=0.0,
+                end=2.5,
+                position=OverlayPosition.TITLE,
+                size=110,
+                color="#ffffff",
+                id=0,
+            ),
+        ),
+        "lower_third": (
+            "Lower third",
+            TextOverlay(
+                text="Your Name\\nRole · Company",
+                start=1.0,
+                end=5.0,
+                position=OverlayPosition.LOWER_THIRD,
+                size=56,
+                color="#cba6f7",
+                id=0,
+            ),
+        ),
+        "hook": (
+            "Hook strap",
+            TextOverlay(
+                text="Wait for it…",
+                start=0.0,
+                end=3.0,
+                position=OverlayPosition.TOP,
+                size=64,
+                color="#f5c2e7",
+                id=0,
+            ),
+        ),
+        "cta": (
+            "CTA caption",
+            TextOverlay(
+                text="Follow for more",
+                start=0.0,
+                end=60.0,
+                position=OverlayPosition.CAPTION,
+                size=52,
+                color="#ffffff",
+                id=0,
+            ),
+        ),
+    }
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -223,12 +273,43 @@ class OverlaysPanel(QWidget):
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._scroll.setStyleSheet("background: transparent;")
-        root.addWidget(self._scroll, 1)
 
-        self._empty = QLabel("No overlays yet. Click \u201cAdd overlay\u201d or \u201cAdd preset\u201d.")
-        self._empty.setObjectName("valueMuted")
-        self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._list_lay.insertWidget(0, self._empty)
+        self._empty = QWidget()
+        self._empty.setObjectName("emptyState")
+        self._empty.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        empty_lay = QVBoxLayout(self._empty)
+        empty_lay.setContentsMargins(18, 18, 18, 18)
+        empty_lay.setSpacing(8)
+        empty_title = QLabel("No text overlays yet")
+        empty_title.setObjectName("emptyTitle")
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_body = QLabel(
+            "Add a title card, hook strap, lower third, or CTA caption. Overlay timing stays synced to the loaded clip."
+        )
+        empty_body.setObjectName("emptyBody")
+        empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_body.setWordWrap(True)
+        quick_row = QHBoxLayout()
+        quick_row.setSpacing(8)
+        quick_row.addStretch(1)
+        for key in ("intro", "lower_third", "cta"):
+            btn = QPushButton(self._PRESET_LIBRARY[key][0])
+            btn.setObjectName("presetChip")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, preset_key=key: self._add_preset(preset_key))
+            quick_row.addWidget(btn)
+        quick_row.addStretch(1)
+        empty_hint = QLabel("Need more starting points? Use Add preset for the full library.")
+        empty_hint.setObjectName("valueMuted")
+        empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_hint.setWordWrap(True)
+        empty_lay.addWidget(empty_title)
+        empty_lay.addWidget(empty_body)
+        empty_lay.addLayout(quick_row)
+        empty_lay.addWidget(empty_hint)
+        root.addWidget(self._empty)
+        root.addWidget(self._scroll, 1)
+        self._refresh_empty_state()
 
     # ------------------------------------------------------------ api
     def overlays(self) -> list[TextOverlay]:
@@ -254,7 +335,7 @@ class OverlaysPanel(QWidget):
         self._rows.append(row)
         insert_index = self._list_lay.count() - 1  # before the stretch
         self._list_lay.insertWidget(insert_index, row)
-        self._empty.setVisible(False)
+        self._refresh_empty_state()
         self._emit()
 
     def _remove(self, overlay_id: int, *, silent: bool = False) -> None:
@@ -264,10 +345,14 @@ class OverlaysPanel(QWidget):
         self._rows.remove(row)
         row.setParent(None)
         row.deleteLater()
-        if not self._rows:
-            self._empty.setVisible(True)
+        self._refresh_empty_state()
         if not silent:
             self._emit()
+
+    def _refresh_empty_state(self) -> None:
+        has_rows = bool(self._rows)
+        self._empty.setVisible(not has_rows)
+        self._scroll.setVisible(has_rows)
 
     def _emit(self) -> None:
         self.overlays_changed.emit(self.overlays())
@@ -275,28 +360,17 @@ class OverlaysPanel(QWidget):
     def _show_presets(self) -> None:
         from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
-        menu.addAction("Intro title card (0–2.5s)",
-                       lambda: self._add(TextOverlay(
-                           text="Title", start=0.0, end=2.5,
-                           position=OverlayPosition.TITLE, size=110,
-                           color="#ffffff", id=_mint_id(),
-                       )))
-        menu.addAction("Lower third: Name",
-                       lambda: self._add(TextOverlay(
-                           text="Your Name\\nRole · Company", start=1.0, end=5.0,
-                           position=OverlayPosition.LOWER_THIRD, size=56,
-                           color="#cba6f7", id=_mint_id(),
-                       )))
-        menu.addAction("Top strap: Hook",
-                       lambda: self._add(TextOverlay(
-                           text="Wait for it…", start=0.0, end=3.0,
-                           position=OverlayPosition.TOP, size=64,
-                           color="#f5c2e7", id=_mint_id(),
-                       )))
-        menu.addAction("Bottom caption: CTA",
-                       lambda: self._add(TextOverlay(
-                           text="Follow for more", start=0.0, end=60.0,
-                           position=OverlayPosition.CAPTION, size=52,
-                           color="#ffffff", id=_mint_id(),
-                       )))
+        for key, (label, _overlay) in self._PRESET_LIBRARY.items():
+            menu.addAction(label, lambda preset_key=key: self._add_preset(preset_key))
         menu.exec(self._presets_btn.mapToGlobal(self._presets_btn.rect().bottomLeft()))
+
+    def _add_preset(self, key: str) -> None:
+        preset = self._PRESET_LIBRARY.get(key)
+        if preset is None:
+            return
+        overlay = replace(preset[1], id=_mint_id())
+        if key == "cta":
+            overlay = replace(overlay, end=self._duration)
+        else:
+            overlay = replace(overlay, end=min(self._duration, overlay.end))
+        self._add(overlay)

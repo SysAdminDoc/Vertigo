@@ -62,6 +62,7 @@ class SubtitlesPanel(QWidget):
         super().__init__(parent)
         self._srt_path: Path | None = None
         self._running = False
+        self._clip_loaded = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -71,6 +72,7 @@ class SubtitlesPanel(QWidget):
         self._toggle.setAccessibleName("Toggle subtitle burn-in")
         self._toggle.setToolTip("When enabled, generated captions are baked directly into the exported pixels.")
         self._toggle.toggled.connect(lambda _: self.changed.emit(self._choice()))
+        self._toggle.toggled.connect(lambda _: self._refresh_status())
         root.addWidget(self._toggle)
 
         grid = QGridLayout()
@@ -131,11 +133,8 @@ class SubtitlesPanel(QWidget):
         self._face_aware.toggled.connect(lambda _: self.changed.emit(self._choice()))
         root.addWidget(self._face_aware)
 
-        self._status = QLabel(
-            "Captions are transcribed locally with faster-whisper. "
-            "The chosen model downloads the first time you use it."
-        )
-        self._status.setObjectName("subtitle")
+        self._status = QLabel("")
+        self._status.setObjectName("inlineNotice")
         self._status.setWordWrap(True)
         root.addWidget(self._status)
 
@@ -166,17 +165,19 @@ class SubtitlesPanel(QWidget):
         btn_row.addWidget(self._clear_btn)
         root.addLayout(btn_row)
         root.addStretch(1)
+        self._sync_controls()
+        self._refresh_status()
 
     # ------------------------------------------------------------ api
     def set_clip_loaded(self, loaded: bool) -> None:
-        self._transcribe_btn.setEnabled(loaded and not self._running)
+        self._clip_loaded = loaded
         if not loaded:
-            self._status.setText("Load a clip to enable caption generation.")
-            self._reset(keep_toggle=True)
+            self._reset(keep_toggle=False)
+        self._sync_controls()
+        self._refresh_status()
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._transcribe_btn.setEnabled(not running and self._transcribe_btn.isEnabled())
         self._transcribe_btn.setText(
             "Transcribing\u2026" if running else "Generate captions"
         )
@@ -185,20 +186,21 @@ class SubtitlesPanel(QWidget):
             self._progress.show()
         else:
             self._progress.hide()
+        self._sync_controls()
+        self._refresh_status()
 
     def set_progress(self, fraction: float) -> None:
         self._progress.setValue(int(max(0.0, min(1.0, fraction)) * 100))
 
-    def set_status(self, text: str) -> None:
-        self._status.setText(text)
+    def set_status(self, text: str, tone: str | None = "accent") -> None:
+        self._set_status(text, tone=tone)
 
     def set_srt_path(self, path: Path | None) -> None:
         self._srt_path = path
-        self._clear_btn.setEnabled(path is not None)
         if path is None:
-            self._status.setText("No captions generated for this clip yet.")
-        else:
-            self._status.setText(f"Captions ready: {path.name}")
+            self._toggle.setChecked(False)
+        self._sync_controls()
+        self._refresh_status()
         self.changed.emit(self._choice())
 
     def choice(self) -> SubtitleChoice:
@@ -250,6 +252,49 @@ class SubtitlesPanel(QWidget):
             self._toggle.setChecked(False)
             self._face_aware.setChecked(False)
         self._srt_path = None
-        self._clear_btn.setEnabled(False)
         self._progress.hide()
+        self._sync_controls()
+        self._refresh_status()
         self.changed.emit(self._choice())
+
+    def _sync_controls(self) -> None:
+        has_captions = self._srt_path is not None
+        can_edit = self._clip_loaded and not self._running
+        self._model.setEnabled(can_edit)
+        self._language.setEnabled(can_edit)
+        self._preset_combo.setEnabled(can_edit)
+        self._face_aware.setEnabled(can_edit)
+        self._transcribe_btn.setEnabled(can_edit)
+        self._clear_btn.setEnabled(self._clip_loaded and has_captions and not self._running)
+        self._toggle.setEnabled(self._clip_loaded and has_captions and not self._running)
+
+    def _refresh_status(self) -> None:
+        if self._running:
+            model = self._model.currentData()
+            preset_label = self._preset_combo.currentText()
+            self._set_status(
+                f"Transcribing locally with whisper-{model}. Captions will be styled as {preset_label}.",
+                tone="accent",
+            )
+            return
+
+        if not self._clip_loaded:
+            self._set_status(
+                "Load a clip to generate captions, choose a style, and optionally burn them into the export.",
+            )
+            return
+
+        if self._srt_path is None:
+            self._set_status(
+                "Captions are transcribed locally with faster-whisper. Generate them once, then choose whether to burn them into the export.",
+            )
+            return
+
+        burn = "Burn-in enabled for export." if self._toggle.isChecked() else "Enable burn-in when you want them baked into the export."
+        self._set_status(f"Captions ready: {self._srt_path.name}. {burn}", tone="success")
+
+    def _set_status(self, text: str, tone: str | None = None) -> None:
+        self._status.setText(text)
+        self._status.setProperty("tone", tone)
+        self._status.style().unpolish(self._status)
+        self._status.style().polish(self._status)

@@ -8,7 +8,6 @@ from PyQt6.QtCore import QSettings, Qt, QUrl
 from PyQt6.QtGui import QCloseEvent, QDesktopServices, QFontMetrics
 from PyQt6.QtWidgets import (
     QButtonGroup,
-    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -20,7 +19,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedLayout,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -31,7 +29,6 @@ from core.overlays import TextOverlay
 from core.presets import PRESETS, Preset, default_preset
 from core.probe import VideoInfo, probe
 from core.reframe import Adjustments, ReframeMode, build_plan
-from core.scenes import detect_scenes
 from core.subtitles import is_installed as subtitles_installed
 from workers.detect_worker import DetectWorker
 from workers.encode_worker import EncodeWorker
@@ -40,6 +37,7 @@ from workers.subtitle_worker import SubtitleWorker
 
 from .adjustments_panel import AdjustmentsPanel
 from .batch_queue import BatchQueue, QueueEntry, QueueStatus
+from .file_dialogs import get_existing_directory, get_save_video_path
 from .file_drop import FileDropZone
 from .output_panel import OutputChoice, OutputPanel
 from .overlays_panel import OverlaysPanel
@@ -54,7 +52,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Vertigo")
-        self.setMinimumSize(1120, 720)
+        self.setMinimumSize(1680, 940)
+        self.resize(1760, 980)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
         # state -------------------------------------------------------
@@ -94,6 +93,9 @@ class MainWindow(QMainWindow):
         self._apply_theme(self._theme_preference, persist=False)
         self._on_mode_changed(ReframeMode.CENTER)
         self._update_preset_ui()
+        self._refresh_overview()
+        self._refresh_progress_hint()
+        self._refresh_hero_header()
 
     # --------------------------------------------- chrome
     def _build_chrome(self) -> None:
@@ -148,6 +150,12 @@ class MainWindow(QMainWindow):
             self._toast.refresh_theme()
         if hasattr(self, "_platform_notice"):
             self._refresh_platform_notice()
+        if hasattr(self, "_overview_notice"):
+            self._refresh_overview()
+        if hasattr(self, "_progress_hint"):
+            self._refresh_progress_hint()
+        if hasattr(self, "_browse_btn"):
+            self._refresh_hero_header()
 
     def _wire_system_theme(self) -> None:
         app = QApplication.instance()
@@ -163,19 +171,20 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------- body
     def _build_body(self) -> None:
-        body = QHBoxLayout(self._body_host)
+        body = QVBoxLayout(self._body_host)
         body.setContentsMargins(20, 20, 20, 20)
-        body.setSpacing(0)
+        body.setSpacing(14)
 
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._splitter.setChildrenCollapsible(False)
-        self._splitter.setHandleWidth(10)
-        self._splitter.addWidget(self._build_hero())
-        self._splitter.addWidget(self._build_sidebar())
-        self._splitter.setStretchFactor(0, 7)
-        self._splitter.setStretchFactor(1, 4)
-        self._splitter.setSizes([780, 420])
-        body.addWidget(self._splitter)
+        self._workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._workspace_splitter.setChildrenCollapsible(False)
+        self._workspace_splitter.setHandleWidth(10)
+        self._workspace_splitter.addWidget(self._build_hero())
+        self._workspace_splitter.addWidget(self._build_setup_workspace())
+        self._workspace_splitter.setStretchFactor(0, 8)
+        self._workspace_splitter.setStretchFactor(1, 7)
+        self._workspace_splitter.setSizes([980, 760])
+        body.addWidget(self._workspace_splitter, 5)
+        body.addWidget(self._build_dashboard_board(), 4)
 
     def _build_hero(self) -> QWidget:
         hero = GlassPanel()
@@ -186,14 +195,33 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         header.setSpacing(12)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
         title = QLabel("Preview")
         title.setObjectName("bigTitle")
-        header.addWidget(title)
+        title_col.addWidget(title)
+        self._hero_hint = QLabel("Import footage to preview framing, trim moments, and export behavior in one place.")
+        self._hero_hint.setObjectName("subtitle")
+        self._hero_hint.setWordWrap(True)
+        title_col.addWidget(self._hero_hint)
+        header.addLayout(title_col, 1)
         header.addStretch(1)
+        self._browse_btn = QPushButton("Import clips")
+        self._browse_btn.setObjectName("ghostBtn")
+        self._browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._browse_btn.setToolTip("Browse for one or more source clips")
+        header.addWidget(self._browse_btn)
+        self._hero_output_btn = QPushButton("Reveal export")
+        self._hero_output_btn.setObjectName("ghostBtn")
+        self._hero_output_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hero_output_btn.setToolTip("Open the folder containing the latest export")
+        self._hero_output_btn.hide()
+        header.addWidget(self._hero_output_btn)
         self._meta_label = QLabel("Waiting for a clip")
         self._meta_label.setObjectName("statusPill")
         self._meta_label.setMaximumWidth(560)
-        header.addWidget(self._meta_label)
+        self._meta_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        header.addWidget(self._meta_label, 0, Qt.AlignmentFlag.AlignVCenter)
         lay.addLayout(header)
 
         self._drop = FileDropZone()
@@ -208,33 +236,157 @@ class MainWindow(QMainWindow):
 
         return hero
 
-    def _build_sidebar(self) -> QWidget:
-        col = QVBoxLayout()
-        col.setSpacing(12)
-        col.setContentsMargins(0, 0, 0, 0)
-
-        col.addWidget(self._build_preset_panel())
-        col.addWidget(self._build_mode_panel())
-
-        self._tabs = QTabWidget()
-        self._tabs.setObjectName("sideTabs")
-        self._tabs.setDocumentMode(True)
-        self._tabs.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._tabs.addTab(self._build_queue_tab(), "Queue")
-        self._tabs.addTab(self._build_adjust_tab(), "Adjust")
-        self._tabs.addTab(self._build_track_tab(), "Track")
-        self._tabs.addTab(self._build_output_tab(), "Output")
-        self._tabs.addTab(self._build_subs_tab(), "Captions")
-        self._tabs.addTab(self._build_overlays_tab(), "Text")
-        col.addWidget(self._tabs, 1)
-
-        col.addLayout(self._build_action_bar())
-        col.addWidget(self._build_progress_panel())
-
+    def _build_setup_workspace(self) -> QWidget:
         host = QWidget()
-        host.setLayout(col)
         host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        grid = QGridLayout(host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+
+        grid.addWidget(self._build_overview_panel(), 0, 0)
+        grid.addWidget(self._build_export_workspace_panel(), 0, 1)
+        grid.addWidget(self._build_preset_panel(), 1, 0)
+        grid.addWidget(self._build_mode_panel(), 1, 1)
+        grid.setColumnStretch(0, 4)
+        grid.setColumnStretch(1, 5)
+        grid.setRowStretch(0, 3)
+        grid.setRowStretch(1, 4)
         return host
+
+    def _build_dashboard_board(self) -> QWidget:
+        host = QWidget()
+        host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        grid = QGridLayout(host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(0)
+        grid.addWidget(self._build_queue_workspace_panel(), 0, 0)
+        grid.addWidget(self._build_look_track_workspace_panel(), 0, 1)
+        grid.addWidget(self._build_output_workspace_panel(), 0, 2)
+        grid.addWidget(self._build_captions_text_workspace_panel(), 0, 3)
+        grid.setColumnStretch(0, 4)
+        grid.setColumnStretch(1, 5)
+        grid.setColumnStretch(2, 5)
+        grid.setColumnStretch(3, 7)
+        return host
+
+    def _build_queue_workspace_panel(self) -> QWidget:
+        panel = GlassPanel("QUEUE")
+        panel.add(self._build_queue_tab(compact=True))
+        return panel
+
+    def _build_look_track_workspace_panel(self) -> QWidget:
+        panel = GlassPanel("LOOK & TRACK")
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        row.addWidget(
+            self._build_tool_section(
+                "Look",
+                "Tonal adjustments are baked directly into the export.",
+                self._build_adjust_tab(compact=True),
+            ),
+            1,
+        )
+        row.addWidget(
+            self._build_tool_section(
+                "Track",
+                "Analyze subjects locally when you want automated framing.",
+                self._build_track_tab(compact=True),
+            ),
+            1,
+        )
+        panel.layout().addLayout(row)
+        return panel
+
+    def _build_output_workspace_panel(self) -> QWidget:
+        panel = GlassPanel("OUTPUT")
+        panel.add(self._build_output_tab(compact=True))
+        return panel
+
+    def _build_captions_text_workspace_panel(self) -> QWidget:
+        panel = GlassPanel("CAPTIONS & TEXT")
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        row.addWidget(
+            self._build_tool_section(
+                "Captions",
+                "Generate, style, and optionally burn captions into the export.",
+                self._build_subs_tab(compact=True),
+            ),
+            1,
+        )
+        row.addWidget(
+            self._build_tool_section(
+                "Text",
+                "Add title cards, hooks, and lower thirds without leaving the main screen.",
+                self._build_overlays_tab(compact=True),
+            ),
+            1,
+        )
+        panel.layout().addLayout(row)
+        return panel
+
+    def _build_tool_section(self, title: str, body: str, widget: QWidget) -> QWidget:
+        host = QWidget()
+        host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        host.setToolTip(body)
+
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("formLabel")
+        lay.addWidget(title_lbl)
+
+        lay.addWidget(widget, 1)
+        return host
+
+    def _build_overview_panel(self) -> QWidget:
+        panel = GlassPanel("SESSION OVERVIEW")
+        panel.layout().setSpacing(8)
+
+        self._overview_title = QLabel("Ready for your first clip")
+        self._overview_title.setObjectName("valueBright")
+        self._overview_title.setWordWrap(True)
+        panel.layout().addWidget(self._overview_title)
+
+        self._overview_body = QLabel(
+            "Import footage to preview framing, captions, trimming, and export in one calm workflow."
+        )
+        self._overview_body.setObjectName("subtitle")
+        self._overview_body.setWordWrap(True)
+        panel.layout().addWidget(self._overview_body)
+
+        metrics = QGridLayout()
+        metrics.setHorizontalSpacing(10)
+        metrics.setVerticalSpacing(4)
+        self._overview_preset = self._add_overview_metric(metrics, 0, 0, "Preset")
+        self._overview_mode = self._add_overview_metric(metrics, 0, 1, "Mode")
+        self._overview_trim = self._add_overview_metric(metrics, 0, 2, "Trim")
+        self._overview_queue = self._add_overview_metric(metrics, 0, 3, "Queue")
+        panel.layout().addLayout(metrics)
+
+        self._overview_notice = QLabel("")
+        self._overview_notice.setObjectName("inlineNotice")
+        self._overview_notice.setWordWrap(True)
+        panel.layout().addWidget(self._overview_notice)
+        return panel
+
+    def _add_overview_metric(self, lay: QGridLayout, row: int, col: int, label: str) -> QLabel:
+        host = QWidget()
+        host_lay = QVBoxLayout(host)
+        host_lay.setContentsMargins(0, 0, 0, 0)
+        host_lay.setSpacing(2)
+        title = QLabel(label)
+        title.setObjectName("formLabel")
+        value = QLabel("")
+        value.setObjectName("valueBright")
+        value.setWordWrap(True)
+        host_lay.addWidget(title)
+        host_lay.addWidget(value)
+        lay.addWidget(host, row, col)
+        return value
 
     def _build_preset_panel(self) -> QWidget:
         panel = GlassPanel("PLATFORM PRESET")
@@ -274,6 +426,7 @@ class MainWindow(QMainWindow):
 
     def _build_mode_panel(self) -> QWidget:
         panel = GlassPanel("REFRAME MODE")
+        panel.layout().setSpacing(10)
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
 
@@ -284,7 +437,7 @@ class MainWindow(QMainWindow):
             ),
             ReframeMode.SMART_TRACK: ModeCard(
                 "smart_track", "Smart track",
-                "Follows faces, never pans across a scene cut."
+                "Tracks faces and respects hard scene cuts."
             ),
             ReframeMode.BLUR_LETTERBOX: ModeCard(
                 "blur_letterbox", "Blur letterbox",
@@ -292,21 +445,32 @@ class MainWindow(QMainWindow):
             ),
             ReframeMode.MANUAL: ModeCard(
                 "manual", "Manual crop",
-                "Drag the viewport on the preview to lock a column."
+                "Drag the crop frame yourself in the preview."
             ),
         }
-        for m, card in self._mode_cards.items():
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        for index, (m, card) in enumerate(self._mode_cards.items()):
             self._mode_group.addButton(card)
-            panel.layout().addWidget(card)
+            grid.addWidget(card, index // 2, index % 2)
             card.clicked.connect(lambda _=False, mode=m: self._on_mode_changed(mode))
+        panel.layout().addLayout(grid)
         self._mode_cards[ReframeMode.CENTER].setChecked(True)
         return panel
 
-    def _build_queue_tab(self) -> QWidget:
+    def _build_queue_tab(self, *, compact: bool = False) -> QWidget:
         host = QWidget()
         lay = QVBoxLayout(host)
-        lay.setContentsMargins(12, 10, 12, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(6)
+        if not compact:
+            intro = QLabel("Keep several clips queued, then export them with one consistent setup.")
+            intro.setObjectName("subtitle")
+            intro.setWordWrap(True)
+            lay.addWidget(intro)
         hdr = QHBoxLayout()
         self._queue_count = QLabel("0 clips")
         self._queue_count.setObjectName("valueMuted")
@@ -325,11 +489,16 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._queue, 1)
         return host
 
-    def _build_adjust_tab(self) -> QWidget:
+    def _build_adjust_tab(self, *, compact: bool = False) -> QWidget:
         host = QWidget()
         lay = QVBoxLayout(host)
-        lay.setContentsMargins(14, 12, 14, 14)
-        lay.setSpacing(8)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        if not compact:
+            intro = QLabel("Fine-tune the source before export. These adjustments are baked directly into the output.")
+            intro.setObjectName("subtitle")
+            intro.setWordWrap(True)
+            lay.addWidget(intro)
 
         self._adjust_panel = AdjustmentsPanel()
         self._adjust_panel.changed.connect(self._on_adjust_changed)
@@ -337,14 +506,14 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         return host
 
-    def _build_track_tab(self) -> QWidget:
+    def _build_track_tab(self, *, compact: bool = False) -> QWidget:
         host = QWidget()
         lay = QVBoxLayout(host)
-        lay.setContentsMargins(16, 14, 16, 16)
-        lay.setSpacing(12)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8 if compact else 10)
 
         self._detect_status = QLabel("Load a clip to find faces and scene cuts.")
-        self._detect_status.setObjectName("subtitle")
+        self._detect_status.setObjectName("inlineNotice")
         self._detect_status.setWordWrap(True)
         lay.addWidget(self._detect_status)
 
@@ -360,7 +529,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._scene_label)
 
         self._detect_btn = QPushButton("Find subjects")
-        self._detect_btn.setObjectName("ghostBtn")
+        self._detect_btn.setObjectName("primaryBtn")
         self._detect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._detect_btn.setToolTip("Run Smart Track analysis on the loaded clip")
         self._detect_btn.setEnabled(False)
@@ -376,14 +545,26 @@ class MainWindow(QMainWindow):
         self._dryrun_btn.setEnabled(False)
         self._dryrun_btn.clicked.connect(self._run_dry)
         lay.addWidget(self._dryrun_btn)
+
+        self._detect_note = QLabel(
+            "Smart Track runs locally. Scene cuts are respected so pans do not drift across hard edits."
+        )
+        self._detect_note.setObjectName("valueMuted")
+        self._detect_note.setWordWrap(True)
+        lay.addWidget(self._detect_note)
         lay.addStretch(1)
         return host
 
-    def _build_output_tab(self) -> QWidget:
+    def _build_output_tab(self, *, compact: bool = False) -> QWidget:
         host = QWidget()
         lay = QVBoxLayout(host)
-        lay.setContentsMargins(14, 12, 14, 14)
-        lay.setSpacing(8)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        if not compact:
+            intro = QLabel("Pick the encoder and quality balance that match your delivery needs. GPU codecs are fastest when available.")
+            intro.setObjectName("subtitle")
+            intro.setWordWrap(True)
+            lay.addWidget(intro)
         self._output_panel = OutputPanel()
         self._output_panel.changed.connect(self._on_output_changed)
         self._output_choice = self._output_panel.current_selection()
@@ -391,21 +572,21 @@ class MainWindow(QMainWindow):
         lay.addStretch(1)
         return host
 
-    def _build_overlays_tab(self) -> QWidget:
+    def _build_overlays_tab(self, *, compact: bool = False) -> QWidget:
         host = QWidget()
         lay = QVBoxLayout(host)
-        lay.setContentsMargins(14, 12, 14, 14)
-        lay.setSpacing(8)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
         self._overlays_panel = OverlaysPanel()
         self._overlays_panel.overlays_changed.connect(self._on_overlays_changed)
         lay.addWidget(self._overlays_panel, 1)
         return host
 
-    def _build_subs_tab(self) -> QWidget:
+    def _build_subs_tab(self, *, compact: bool = False) -> QWidget:
         host = QWidget()
         lay = QVBoxLayout(host)
-        lay.setContentsMargins(14, 12, 14, 14)
-        lay.setSpacing(8)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
         self._subs_panel = SubtitlesPanel()
         self._subs_panel.changed.connect(self._on_subs_changed)
         self._subs_panel.transcribe_requested.connect(self._run_transcribe)
@@ -417,21 +598,21 @@ class MainWindow(QMainWindow):
     def _build_action_bar(self) -> QHBoxLayout:
         actions = QHBoxLayout()
         actions.setSpacing(10)
-        self._export_btn = QPushButton("Export")
+        self._export_btn = QPushButton("Export clip")
         self._export_btn.setObjectName("primaryBtn")
         self._export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._export_btn.setEnabled(False)
         self._export_btn.setToolTip("Export the selected clip using the current preset and mode")
         self._export_btn.setMinimumHeight(42)
 
-        self._export_all_btn = QPushButton("Export all")
+        self._export_all_btn = QPushButton("Export queue")
         self._export_all_btn.setObjectName("ghostBtn")
         self._export_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._export_all_btn.setEnabled(False)
         self._export_all_btn.setToolTip("Export every pending clip in the queue")
         self._export_all_btn.setMinimumHeight(42)
 
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton("Stop")
         self._cancel_btn.setObjectName("destructiveGhost")
         self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._cancel_btn.setToolTip("Cancel the active analysis or export")
@@ -443,18 +624,19 @@ class MainWindow(QMainWindow):
         actions.addWidget(self._cancel_btn, 1)
         return actions
 
-    def _build_progress_panel(self) -> QWidget:
-        panel = GlassPanel()
+    def _build_export_workspace_panel(self) -> QWidget:
+        panel = GlassPanel("EXPORT")
+        panel.layout().setSpacing(10)
+        panel.layout().addLayout(self._build_action_bar())
 
-        # Header row: label + idle-state status pill (collapses log when not busy)
         hdr = QHBoxLayout()
         hdr.setSpacing(10)
-        hdr_label = QLabel("Export")
-        hdr_label.setObjectName("sectionTitle")
-        hdr.addWidget(hdr_label)
+        label = QLabel("Status")
+        label.setObjectName("formLabel")
+        hdr.addWidget(label)
         hdr.addStretch(1)
-        self._export_status = QLabel("Ready")
-        self._export_status.setObjectName("valueMuted")
+        self._export_status = QLabel("Idle")
+        self._export_status.setObjectName("statusPill")
         hdr.addWidget(self._export_status)
         panel.layout().addLayout(hdr)
 
@@ -465,13 +647,18 @@ class MainWindow(QMainWindow):
         self._export_progress.setAccessibleName("Export progress")
         panel.layout().addWidget(self._export_progress)
 
+        self._progress_hint = QLabel("")
+        self._progress_hint.setObjectName("inlineNotice")
+        self._progress_hint.setWordWrap(True)
+        panel.layout().addWidget(self._progress_hint)
+
         self._log = QTextEdit()
         self._log.setObjectName("logPanel")
         self._log.setReadOnly(True)
-        self._log.setFixedHeight(96)
-        self._log.setPlaceholderText("Encoder output streams here during an export.")
+        self._log.setFixedHeight(88)
+        self._log.setPlaceholderText("FFmpeg output appears here during dry runs and live exports.")
         self._log.setAccessibleName("Export log")
-        self._log.hide()   # revealed only while an export is running
+        self._log.hide()
         panel.layout().addWidget(self._log)
 
         self._output_row = QWidget()
@@ -496,6 +683,8 @@ class MainWindow(QMainWindow):
     def _wire(self) -> None:
         self._drop.file_dropped.connect(self._import_one)
         self._drop.files_dropped.connect(self._import_many)
+        self._browse_btn.clicked.connect(self._browse_for_clips)
+        self._hero_output_btn.clicked.connect(self._open_last_output_folder)
         self._export_btn.clicked.connect(self._start_export)
         self._export_all_btn.clicked.connect(self._start_batch_export)
         self._cancel_btn.clicked.connect(self._cancel_active)
@@ -518,6 +707,7 @@ class MainWindow(QMainWindow):
             else "No platform duration limit"
         )
         self._preset_detail.setText(
+            f"{p.tagline}\n"
             f"{p.resolution_label} \u00b7 {p.fps}\u202ffps \u00b7 {p.video_bitrate} video \u00b7 {p.audio_bitrate} audio\n"
             f"{duration}."
         )
@@ -528,6 +718,7 @@ class MainWindow(QMainWindow):
             return
         if not self._info:
             self._platform_notice.hide()
+            self._refresh_overview()
             return
 
         duration = max(0.0, (self._trim_high or self._info.duration) - (self._trim_low or 0.0))
@@ -555,6 +746,150 @@ class MainWindow(QMainWindow):
                 self._export_btn.setToolTip("Export the selected clip using the current preset and mode")
         self._platform_notice.style().unpolish(self._platform_notice)
         self._platform_notice.style().polish(self._platform_notice)
+        self._refresh_overview()
+
+    def _refresh_overview(self) -> None:
+        if not hasattr(self, "_overview_title"):
+            return
+
+        entries = self._queue.entries() if hasattr(self, "_queue") else []
+        pending = len([e for e in entries if e.status is QueueStatus.PENDING])
+        done = len([e for e in entries if e.status is QueueStatus.DONE])
+        failed = len([e for e in entries if e.status is QueueStatus.FAILED])
+
+        self._overview_preset.setText(self._preset.label)
+        self._overview_mode.setText({
+            ReframeMode.CENTER: "Center crop",
+            ReframeMode.SMART_TRACK: "Smart track",
+            ReframeMode.BLUR_LETTERBOX: "Blur letterbox",
+            ReframeMode.MANUAL: "Manual crop",
+        }[self._mode])
+
+        if not entries:
+            queue_text = "Empty"
+        else:
+            queue_text = f"{len(entries)} clip{'s' if len(entries) != 1 else ''}"
+            if pending:
+                queue_text += f" · {pending} pending"
+            elif done:
+                queue_text += " · ready"
+            if failed:
+                queue_text += f" · {failed} issue{'s' if failed != 1 else ''}"
+        self._overview_queue.setText(queue_text)
+
+        notice_tone: str | None = None
+        if not self._info or not self._current_entry:
+            self._overview_title.setText("Ready for your first clip")
+            self._overview_body.setText(
+                "Import footage to preview framing, trim moments, captions, and export settings in one calm workflow."
+            )
+            self._overview_trim.setText("No clip loaded")
+            notice = "Next step: drop footage on the preview or click anywhere in the canvas to browse."
+        else:
+            self._overview_title.setText(self._current_entry.path.name)
+            kept = max(0.0, (self._trim_high or self._info.duration) - (self._trim_low or 0.0))
+            full_clip = abs((self._trim_low or 0.0)) < 0.01 and abs((self._trim_high or self._info.duration) - self._info.duration) < 0.01
+            self._overview_trim.setText(
+                f"Full clip · {_fmt_duration(self._info.duration)}"
+                if full_clip
+                else f"{_fmt_duration(self._trim_low)}–{_fmt_duration(self._trim_high or self._info.duration)}"
+            )
+            self._overview_body.setText(
+                f"{self._info.width}x{self._info.height} · {_fmt_duration(self._info.duration)} source · "
+                f"{self._preset.resolution_label} delivery · {_fmt_duration(kept)} kept."
+            )
+
+            if self._encode_worker and self._encode_worker.isRunning():
+                notice = "Export is running now. Keep the window open and Vertigo will finish the clip or queue automatically."
+                notice_tone = "accent"
+            elif self._subtitle_worker and self._subtitle_worker.isRunning():
+                notice = "Caption generation is running locally. Export will be ready again as soon as transcription finishes."
+                notice_tone = "accent"
+            elif self._detect_worker and self._detect_worker.isRunning():
+                notice = "Smart Track is analyzing subjects and scene cuts locally."
+                notice_tone = "accent"
+            elif self._mode is ReframeMode.SMART_TRACK and not self._track_points:
+                notice = "Next step: run Find subjects for guided framing, or switch to Center crop if you want the fastest export."
+                notice_tone = "warning"
+            elif self._mode is ReframeMode.MANUAL:
+                notice = "Next step: drag the crop frame in the preview until the composition feels right, then export."
+            elif (
+                self._current_entry.id in self._clip_subs
+                and self._subtitle_choice
+                and self._subtitle_choice.burn_in
+            ):
+                notice = "Ready to export. Generated captions will be burned directly into the output."
+                notice_tone = "success"
+            else:
+                notice = "Current setup is ready to export."
+                notice_tone = "success"
+
+        self._overview_notice.setText(notice)
+        self._overview_notice.setProperty("tone", notice_tone)
+        self._overview_notice.style().unpolish(self._overview_notice)
+        self._overview_notice.style().polish(self._overview_notice)
+
+    def _refresh_progress_hint(self) -> None:
+        if not hasattr(self, "_progress_hint"):
+            return
+        if self._log.isVisible():
+            self._progress_hint.hide()
+            return
+
+        self._progress_hint.show()
+        tone: str | None = None
+        if not self._info:
+            text = "Load a clip to preview export progress, encoder notes, and the save destination here."
+        elif self._batch_running:
+            text = "Queue export is active. Each pending clip will run in order and report progress here."
+            tone = "accent"
+        elif self._last_output_path:
+            text = "Your latest export is ready below. Reveal it in the folder or export again after making more adjustments."
+            tone = "success"
+        else:
+            text = "When you export, Vertigo will stream live FFmpeg notes here and keep the latest output easy to reveal."
+
+        self._progress_hint.setText(text)
+        self._progress_hint.setProperty("tone", tone)
+        self._progress_hint.style().unpolish(self._progress_hint)
+        self._progress_hint.style().polish(self._progress_hint)
+
+    def _refresh_hero_header(self) -> None:
+        if not hasattr(self, "_browse_btn"):
+            return
+        if self._info and self._current_entry:
+            if self._mode is ReframeMode.MANUAL:
+                hint = "Space plays the preview. Drag the crop frame directly in the canvas to set composition."
+            elif self._mode is ReframeMode.SMART_TRACK:
+                hint = "Space plays the preview. Run subject detection when you want the crop to follow your subject."
+            else:
+                hint = "Space plays the preview. Use the trim timeline below the preview to choose the exported range."
+            self._hero_hint.setText(hint)
+            self._browse_btn.setText("Add clips")
+            self._meta_label.setProperty("tone", "success")
+        else:
+            self._hero_hint.setText("Import footage to preview framing, trim moments, and export behavior in one place.")
+            self._browse_btn.setText("Import clips")
+            self._meta_label.setProperty("tone", None)
+
+        has_output = self._last_output_path is not None
+        self._hero_output_btn.setVisible(has_output)
+        if has_output:
+            self._hero_output_btn.setText(
+                "Reveal queue folder" if self._last_output_path.is_dir() else "Reveal export"
+            )
+
+        self._meta_label.style().unpolish(self._meta_label)
+        self._meta_label.style().polish(self._meta_label)
+
+    def _browse_for_clips(self) -> None:
+        self._drop.browse()
+
+    def _set_detect_status(self, text: str, tone: str | None = None) -> None:
+        self._detect_status.setText(text)
+        self._detect_status.setProperty("tone", tone)
+        self._detect_status.style().unpolish(self._detect_status)
+        self._detect_status.style().polish(self._detect_status)
 
     # --------------------------------------------- mode
     def _on_mode_changed(self, mode: ReframeMode) -> None:
@@ -563,28 +898,33 @@ class MainWindow(QMainWindow):
         self._player.set_mode(mode.value)
 
         if mode is ReframeMode.SMART_TRACK:
-            self._tabs.setCurrentIndex(2)  # TRACK tab
             if self._info is None:
-                self._detect_status.setText("Load a clip to find faces and scene cuts.")
+                self._set_detect_status("Load a clip to find faces and scene cuts.")
                 self._scene_label.setText("")
                 self._refresh_detection_actions()
+                self._refresh_overview()
                 return
             if not self._track_points:
                 if self._suppress_auto_detect:
-                    self._detect_status.setText("Smart Track will analyze this clip during batch export.")
+                    self._set_detect_status("Smart Track will analyze this clip during batch export.", tone="accent")
                 else:
                     self._run_detect()
             else:
-                self._detect_status.setText(f"Subject tracking ready: {len(self._track_points)} keyframes.")
+                self._set_detect_status(
+                    f"Subject tracking ready: {len(self._track_points)} keyframes.",
+                    tone="success",
+                )
         else:
             self._detect_progress.hide()
             if mode is ReframeMode.MANUAL:
-                self._detect_status.setText("Manual mode: drag the crop frame in the preview.")
+                self._set_detect_status("Manual mode: drag the crop frame in the preview.")
             elif mode is ReframeMode.BLUR_LETTERBOX:
-                self._detect_status.setText("Blur Letterbox keeps the full frame and fills the background.")
+                self._set_detect_status("Blur Letterbox keeps the full frame and fills the background.")
             else:
-                self._detect_status.setText("Center Crop is static and does not need analysis.")
+                self._set_detect_status("Center Crop is static and does not need analysis.")
         self._refresh_detection_actions()
+        self._refresh_overview()
+        self._refresh_hero_header()
 
     def _refresh_detection_actions(self) -> None:
         if not hasattr(self, "_detect_btn"):
@@ -656,6 +996,9 @@ class MainWindow(QMainWindow):
         self._kick_scene_detection(info.path)
         if hasattr(self, "_overlays_panel"):
             self._overlays_panel.set_duration(info.duration)
+        self._refresh_progress_hint()
+        self._refresh_overview()
+        self._refresh_hero_header()
 
     def _refresh_queue_count(self) -> None:
         n = self._queue.count()
@@ -669,7 +1012,14 @@ class MainWindow(QMainWindow):
         if failed:
             parts.append(f"{failed} failed")
         self._queue_count.setText("  \u00b7  ".join(parts))
-        self._export_all_btn.setEnabled(pending > 0)
+        busy = bool(
+            (self._encode_worker and self._encode_worker.isRunning()) or
+            (self._detect_worker and self._detect_worker.isRunning()) or
+            self._batch_running
+        )
+        self._export_all_btn.setEnabled(pending > 0 and not busy)
+        self._refresh_overview()
+        self._refresh_hero_header()
 
     def _set_meta_text(self, text: str) -> None:
         self._meta_label.setToolTip(text)
@@ -707,7 +1057,7 @@ class MainWindow(QMainWindow):
         self._track_points = []
         self._scenes = []
         self._scene_label.setText("")
-        self._detect_status.setText("Load a clip to find faces and scene cuts.")
+        self._set_detect_status("Load a clip to find faces and scene cuts.")
         if self._scene_worker and self._scene_worker.isRunning():
             self._scene_worker.cancel()
         self._player.set_shot_boundaries([])
@@ -718,16 +1068,19 @@ class MainWindow(QMainWindow):
         self._export_all_btn.setEnabled(False)
         self._titlebar.set_subtitle("Vertical video studio")
         self._export_progress.setValue(0)
-        self._set_export_status("Ready")
+        self._set_export_status("Idle")
         self._log.clear()
         self._log.hide()
-        self._last_output_path = None
-        self._output_row.hide()
+        if not self._last_output_path:
+            self._output_row.hide()
         self._refresh_platform_notice()
         self._refresh_detection_actions()
+        self._refresh_progress_hint()
         if hasattr(self, "_subs_panel"):
             self._subs_panel.set_clip_loaded(False)
             self._subs_panel.set_srt_path(None)
+        self._refresh_overview()
+        self._refresh_hero_header()
 
     # --------------------------------------------- interactions
     def _on_manual_drag(self, x: float) -> None:
@@ -743,6 +1096,7 @@ class MainWindow(QMainWindow):
         self._trim_low = low
         self._trim_high = high
         self._refresh_platform_notice()
+        self._refresh_overview()
 
     def _on_adjust_changed(self, adj: Adjustments) -> None:
         self._adjustments = adj
@@ -752,6 +1106,7 @@ class MainWindow(QMainWindow):
 
     def _on_subs_changed(self, choice: SubtitleChoice) -> None:
         self._subtitle_choice = choice
+        self._refresh_overview()
 
     def _on_overlays_changed(self, overlays: list) -> None:
         self._overlays = overlays
@@ -763,6 +1118,7 @@ class MainWindow(QMainWindow):
                 path.unlink(missing_ok=True)
             except Exception:
                 pass
+        self._refresh_overview()
 
     # --------------------------------------------- transcription
     def _run_transcribe(
@@ -791,6 +1147,7 @@ class MainWindow(QMainWindow):
         )
         if not subtitles_installed():
             self._subs_panel.set_status("Installing faster-whisper (one-time, ~200 MB)\u2026")
+        self._refresh_overview()
 
         entry_id = self._current_entry.id
         self._subtitle_worker = SubtitleWorker(
@@ -818,11 +1175,13 @@ class MainWindow(QMainWindow):
         if self._current_entry and self._current_entry.id == entry_id:
             self._subs_panel.set_srt_path(srt)
         self._toast.show_toast(f"Captions ready: {srt.name}", kind="success")
+        self._refresh_overview()
 
     def _on_subs_fail(self, msg: str) -> None:
         self._subs_panel.set_running(False)
-        self._subs_panel.set_status(f"Transcription failed: {msg}")
+        self._subs_panel.set_status(f"Transcription failed: {msg}", tone="warning")
         self._toast.show_toast(msg, kind="error")
+        self._refresh_overview()
 
     # --------------------------------------------- detection
     def _run_detect(self) -> None:
@@ -832,24 +1191,17 @@ class MainWindow(QMainWindow):
             return
         if self._detect_worker and self._detect_worker.isRunning():
             return
-        self._detect_status.setText("Scanning for faces\u2026")
+        self._set_detect_status("Scanning for faces\u2026", tone="accent")
         self._detect_progress.setValue(0)
         self._detect_progress.setFormat("Analysis %p%")
         self._detect_progress.show()
         self._refresh_detection_actions()
 
-        # Scene detection is already kicked off on clip load and its
-        # result is stored in `self._scenes`. If the background worker
-        # hasn't finished yet, fall back to an inline pass so Smart
-        # Track isn't blocked waiting on it.
-        if not self._scenes:
-            try:
-                self._scenes = detect_scenes(self._info.path)
-            except Exception:
-                self._scenes = []
         if self._scenes:
             n = len(self._scenes)
             self._scene_label.setText(f"{n} scene{'' if n == 1 else 's'} detected \u00b7 panning will respect cuts")
+        elif self._scene_worker and self._scene_worker.isRunning():
+            self._scene_label.setText("Scene cuts are still loading in the background.")
         else:
             self._scene_label.setText("Continuous take \u2014 no hard cuts detected")
 
@@ -866,26 +1218,33 @@ class MainWindow(QMainWindow):
         self._detect_worker.failed.connect(self._on_detect_fail)
         self._detect_worker.start()
         self._refresh_detection_actions()
+        self._refresh_overview()
 
     def _on_detect_done(self, points: list) -> None:
         self._track_points = points
         self._detect_progress.hide()
         if not points:
-            self._detect_status.setText("No faces detected \u2014 Export will fall back to a stable center crop.")
+            self._set_detect_status(
+                "No faces detected \u2014 export will fall back to a stable center crop.",
+                tone="warning",
+            )
         else:
             extra = f" across {len(self._scenes)} scenes" if self._scenes else ""
-            self._detect_status.setText(
-                f"Tracking {len(points)} keyframes{extra}. Export will follow the subject."
+            self._set_detect_status(
+                f"Tracking {len(points)} keyframes{extra}. Export will follow the subject.",
+                tone="success",
             )
         if points:
             self._player.set_track_x(points[0].x)
         self._refresh_detection_actions()
+        self._refresh_overview()
 
     def _on_detect_fail(self, msg: str) -> None:
         self._detect_progress.hide()
-        self._detect_status.setText(f"Detection failed: {msg}")
+        self._set_detect_status(f"Detection failed: {msg}", tone="warning")
         self._toast.show_toast("Smart Track failed. Try Center Crop or Manual.", kind="error")
         self._refresh_detection_actions()
+        self._refresh_overview()
 
     # --------------------------------------------- export (single)
     def _start_export(self) -> None:
@@ -894,13 +1253,7 @@ class MainWindow(QMainWindow):
         if not self._confirm_platform_duration():
             return
         suggested = self._default_output_path(self._info)
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export vertical",
-            str(suggested),
-            "MP4 video (*.mp4)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
+        path = get_save_video_path(self, suggested)
         if not path:
             return
         self._run_encode_job(self._info, Path(path), self._current_entry)
@@ -1013,7 +1366,7 @@ class MainWindow(QMainWindow):
         self._log.show()
         self._log.append(f"Mode: {self._mode.value}  \u00b7  {plan.notes}")
         self._export_progress.setValue(0)
-        self._set_export_status("Encoding 0%")
+        self._set_export_status("Encoding 0%", tone="accent")
         self._encode_worker_percent = 0
         self._output_row.hide()
         self._export_btn.hide()
@@ -1021,6 +1374,8 @@ class MainWindow(QMainWindow):
         self._cancel_btn.setEnabled(True)
         self._export_all_btn.setEnabled(False)
         self._set_encode_busy(True)
+        self._refresh_progress_hint()
+        self._refresh_overview()
 
         self._encode_worker = EncodeWorker(job)
         self._encode_worker.progress.connect(self._on_export_progress)
@@ -1065,7 +1420,8 @@ class MainWindow(QMainWindow):
         self._log.append("\u2500" * 58)
         for line in report.as_text().splitlines():
             self._log.append(line)
-        self._set_export_status("Plan ready")
+        self._set_export_status("Plan ready", tone="accent")
+        self._refresh_progress_hint()
         self._toast.show_toast("Dry-run plan written to the export log.", kind="info")
 
     def _kick_scene_detection(self, path: Path) -> None:
@@ -1073,7 +1429,6 @@ class MainWindow(QMainWindow):
         to real cuts. Cancels any in-flight scan from a previous clip."""
         if self._scene_worker and self._scene_worker.isRunning():
             self._scene_worker.cancel()
-            self._scene_worker.wait(200)
 
         worker = SceneWorker(path)
         worker.finished_ok.connect(self._on_scenes_ready)
@@ -1081,9 +1436,12 @@ class MainWindow(QMainWindow):
         self._scene_worker = worker
         worker.start()
 
-    def _on_scenes_ready(self, scenes: list) -> None:
+    def _on_scenes_ready(self, worker_path: str, scenes: list) -> None:
         # Guard against stale results from a previous clip
         if not self._info:
+            return
+        current_path = Path(self._info.path)
+        if Path(worker_path) != current_path:
             return
         self._scenes = scenes or []
         boundaries = [end for (_start, end) in self._scenes
@@ -1097,6 +1455,7 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self._scene_label.setText("Continuous take \u2014 no hard cuts detected")
+        self._refresh_overview()
 
     def _smart_track_crop_width_frac(self, *, info: VideoInfo | None = None) -> float | None:
         """Return the 9:16 viewport width as a fraction of source width,
@@ -1131,6 +1490,8 @@ class MainWindow(QMainWindow):
             QFontMetrics(self._output_label.font()).elidedText(label, Qt.TextElideMode.ElideMiddle, width)
         )
         self._output_row.show()
+        self._refresh_progress_hint()
+        self._refresh_hero_header()
 
     def _open_last_output_folder(self) -> None:
         if not self._last_output_path:
@@ -1141,22 +1502,27 @@ class MainWindow(QMainWindow):
     def _on_export_progress(self, fraction: float) -> None:
         pct = int(max(0.0, min(1.0, fraction)) * 100)
         self._export_progress.setValue(pct)
-        self._set_export_status(f"Encoding {pct}%")
+        self._set_export_status(f"Encoding {pct}%", tone="accent")
+        self._refresh_overview()
 
-    def _set_export_status(self, text: str) -> None:
+    def _set_export_status(self, text: str, tone: str | None = None) -> None:
         if hasattr(self, "_export_status"):
             self._export_status.setText(text)
+            self._export_status.setProperty("tone", tone)
+            self._export_status.style().unpolish(self._export_status)
+            self._export_status.style().polish(self._export_status)
 
     def _on_export_done(self, out: str, entry_id: int | None) -> None:
         self._last_output_path = Path(out)
         self._export_progress.setValue(100)
-        self._set_export_status("Complete")
+        self._set_export_status("Complete", tone="success")
         self._append_log(f"[done] Exported {Path(out).name}")
         self._show_output_destination(Path(out))
         self._toast.show_toast(f"Exported {Path(out).name}", kind="success")
         if entry_id is not None:
             self._queue.update_status(entry_id, QueueStatus.DONE, "exported")
         self._refresh_queue_count()
+        self._refresh_overview()
         if self._batch_running:
             self._advance_batch()
         else:
@@ -1165,11 +1531,12 @@ class MainWindow(QMainWindow):
     def _on_export_fail(self, msg: str, entry_id: int | None) -> None:
         self._append_log(f"[error] {msg}")
         cancelled = "cancel" in msg.lower()
-        self._set_export_status("Cancelled" if cancelled else "Export failed")
+        self._set_export_status("Cancelled" if cancelled else "Export failed", tone="warning")
         self._toast.show_toast(msg, kind="warning" if cancelled else "error")
         if entry_id is not None:
             self._queue.update_status(entry_id, QueueStatus.FAILED, msg)
         self._refresh_queue_count()
+        self._refresh_overview()
         if self._batch_running:
             self._advance_batch()
         else:
@@ -1183,13 +1550,14 @@ class MainWindow(QMainWindow):
             return
         self._batch_running = False
         self._cancel_btn.setEnabled(False)
-        self._set_export_status("Cancelling\u2026")
+        self._set_export_status("Cancelling\u2026", tone="warning")
         if has_encode and self._encode_worker:
             self._encode_worker.cancel()
         if has_detect and self._detect_worker:
             self._detect_worker.cancel()
         if has_subs and self._subtitle_worker:
             self._subtitle_worker.cancel()
+        self._refresh_overview()
 
     def _reset_export_ui(self) -> None:
         self._export_btn.show()
@@ -1197,6 +1565,8 @@ class MainWindow(QMainWindow):
         self._cancel_btn.setEnabled(True)
         self._set_encode_busy(False)
         self._refresh_queue_count()
+        self._refresh_progress_hint()
+        self._refresh_overview()
 
     def _set_encode_busy(self, busy: bool) -> None:
         for btn in self._preset_buttons.values():
@@ -1213,17 +1583,14 @@ class MainWindow(QMainWindow):
             return
         if not self._confirm_batch_platform_durations(pending):
             return
-        out_dir = QFileDialog.getExistingDirectory(
-            self,
-            "Output folder for batch",
-            "",
-            QFileDialog.Option.DontUseNativeDialog,
-        )
+        out_dir = get_existing_directory(self, "Output folder for batch")
         if not out_dir:
             return
         self._batch_out_dir = Path(out_dir)
         self._batch_running = True
         self._toast.show_toast(f"Batch export started: {len(pending)} clips", kind="info")
+        self._refresh_progress_hint()
+        self._refresh_overview()
         self._advance_batch()
 
     def _advance_batch(self) -> None:
@@ -1233,7 +1600,7 @@ class MainWindow(QMainWindow):
         pending = self._queue.pending_entries()
         if not pending:
             self._batch_running = False
-            self._set_export_status("Batch complete")
+            self._set_export_status("Batch complete", tone="success")
             if hasattr(self, "_batch_out_dir"):
                 self._last_output_path = self._batch_out_dir
                 self._show_output_destination(self._batch_out_dir)
@@ -1257,6 +1624,7 @@ class MainWindow(QMainWindow):
         self._trim_low = 0.0
         self._trim_high = info.duration
         self._refresh_platform_notice()
+        self._refresh_overview()
         if self._mode is ReframeMode.SMART_TRACK:
             # For batch we re-detect per clip. Kick detect then encode when done.
             self._scenes = []
@@ -1267,15 +1635,14 @@ class MainWindow(QMainWindow):
             self._run_encode_job(info, out, entry)
 
     def _run_detect_then_encode(self, info: VideoInfo, entry: QueueEntry) -> None:
-        self._detect_status.setText(f"Batch analysis: {entry.path.name}")
+        self._set_detect_status(f"Batch analysis: {entry.path.name}", tone="accent")
         self._detect_progress.setValue(0)
         self._detect_progress.setFormat("Analysis %p%")
         self._detect_progress.show()
         self._refresh_detection_actions()
-        try:
-            self._scenes = detect_scenes(info.path)
-        except Exception:
-            self._scenes = []
+        self._refresh_overview()
+        self._scenes = []
+        self._kick_scene_detection(info.path)
 
         worker = DetectWorker(
             info.path,
@@ -1288,12 +1655,14 @@ class MainWindow(QMainWindow):
             self._track_points = points
             self._detect_progress.hide()
             self._refresh_detection_actions()
+            self._refresh_overview()
             out = self._batch_out_dir / f"{info.path.stem}_{self._preset.id}.mp4"
             self._run_encode_job(info, out, entry)
         def _fail(msg):
             self._detect_progress.hide()
             self._queue.update_status(entry.id, QueueStatus.FAILED, f"detect: {msg}")
             self._refresh_detection_actions()
+            self._refresh_overview()
             self._advance_batch()
         worker.finished_ok.connect(_done)
         worker.failed.connect(_fail)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import (
     QPropertyAnimation,
+    QSize,
     QTimer,
     Qt,
 )
@@ -73,7 +74,8 @@ class ModeCard(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(84)
+        self.setMinimumWidth(180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setToolTip(subtitle)
         self.setAccessibleName(title)
@@ -108,6 +110,14 @@ class ModeCard(QPushButton):
             f"color: {theme.subtext0}; font-size: 11px; line-height: 140%;"
         )
         self._icon.update()
+
+    def sizeHint(self) -> QSize:
+        hint = self.layout().sizeHint()
+        return QSize(max(180, hint.width()), max(84, hint.height()))
+
+    def minimumSizeHint(self) -> QSize:
+        hint = self.layout().minimumSize()
+        return QSize(max(180, hint.width()), max(84, hint.height()))
 
 
 class Toast(QLabel):

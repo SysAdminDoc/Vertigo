@@ -120,6 +120,8 @@ def run(job: EncodeJob, on_progress=None, on_log=None, cancel_cb=None) -> int:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         creationflags=_no_window_flags(),
     )
