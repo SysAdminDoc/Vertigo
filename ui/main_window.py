@@ -28,15 +28,11 @@ from core.overlays import TextOverlay
 from core.presets import PRESETS, Preset, default_preset
 from core.probe import VideoInfo, probe
 from core.reframe import Adjustments, ReframeMode
-from workers.detect_worker import DetectWorker
-from workers.encode_worker import EncodeWorker
-from workers.scene_worker import SceneWorker
-from workers.subtitle_worker import SubtitleWorker
 
 from .adjustments_panel import AdjustmentsPanel
 from .batch_queue import BatchQueue, QueueEntry, QueueStatus
 from .file_drop import FileDropZone
-from .main_controller import MainControllerMixin, _fmt_duration
+from .main_controller import MainController, _fmt_duration
 from .output_panel import OutputChoice, OutputPanel
 from .overlays_panel import OverlaysPanel
 from .subtitles_panel import SubtitleChoice, SubtitlesPanel
@@ -46,7 +42,7 @@ from .video_player import VideoPlayer
 from .widgets import GlassPanel, ModeCard, Toast
 
 
-class MainWindow(MainControllerMixin, QMainWindow):
+class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Vertigo")
@@ -54,7 +50,10 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self.resize(1760, 980)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
-        # state -------------------------------------------------------
+        # UI-session state (everything worker/batch-related lives on
+        # self._ctl — see ui/main_controller.py). The split is clean:
+        # the window owns what the user has selected or loaded, the
+        # controller owns background jobs and the results they produce.
         self._settings = QSettings("Vertigo", "Vertigo")
         self._theme_preference = sanitize_theme_preference(
             self._settings.value("theme", "system", type=str)
@@ -65,24 +64,15 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._preset: Preset = default_preset()
         self._manual_x: float = 0.5
         self._adjustments: Adjustments = Adjustments()
-        self._track_points: list = []
-        self._scenes: list[tuple[float, float]] = []
         self._trim_low: float = 0.0
         self._trim_high: float = 0.0
-
-        self._detect_worker: DetectWorker | None = None
-        self._encode_worker: EncodeWorker | None = None
-        self._subtitle_worker: SubtitleWorker | None = None
-        self._scene_worker: SceneWorker | None = None
-        self._batch_running: bool = False
-        self._suppress_auto_detect: bool = False
-        self._last_output_path: Path | None = None
-
-        # per-clip subtitle state keyed by queue entry id
-        self._clip_subs: dict[int, Path] = {}
         self._output_choice: OutputChoice | None = None
         self._subtitle_choice: SubtitleChoice | None = None
         self._overlays: list[TextOverlay] = []
+
+        # Controller owns workers, analysis results, batch state,
+        # last-output path, per-clip subtitle paths.
+        self._ctl = MainController(self)
 
         self._build_chrome()
         self._build_body()
@@ -531,7 +521,7 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._detect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._detect_btn.setToolTip("Run Smart Track analysis on the loaded clip")
         self._detect_btn.setEnabled(False)
-        self._detect_btn.clicked.connect(self._run_detect)
+        self._detect_btn.clicked.connect(self._ctl.run_detect)
         lay.addWidget(self._detect_btn)
 
         self._dryrun_btn = QPushButton("Show plan (dry run)")
@@ -541,7 +531,7 @@ class MainWindow(MainControllerMixin, QMainWindow):
             "Print the per-scene reframe plan without encoding. No file is written."
         )
         self._dryrun_btn.setEnabled(False)
-        self._dryrun_btn.clicked.connect(self._run_dry)
+        self._dryrun_btn.clicked.connect(self._ctl.run_dry)
         lay.addWidget(self._dryrun_btn)
 
         self._detect_note = QLabel(
@@ -587,8 +577,8 @@ class MainWindow(MainControllerMixin, QMainWindow):
         lay.setSpacing(6)
         self._subs_panel = SubtitlesPanel()
         self._subs_panel.changed.connect(self._on_subs_changed)
-        self._subs_panel.transcribe_requested.connect(self._run_transcribe)
-        self._subs_panel.clear_requested.connect(self._on_subs_cleared)
+        self._subs_panel.transcribe_requested.connect(self._ctl.run_transcribe)
+        self._subs_panel.clear_requested.connect(self._ctl.on_subs_cleared)
         self._subtitle_choice = self._subs_panel.choice()
         lay.addWidget(self._subs_panel)
         return host
@@ -671,7 +661,7 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._open_output_btn.setObjectName("ghostBtn")
         self._open_output_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._open_output_btn.setToolTip("Open the folder containing the latest export")
-        self._open_output_btn.clicked.connect(self._open_last_output_folder)
+        self._open_output_btn.clicked.connect(self._ctl.open_last_output_folder)
         output_lay.addWidget(self._open_output_btn)
         self._output_row.hide()
         panel.layout().addWidget(self._output_row)
@@ -682,10 +672,10 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._drop.file_dropped.connect(self._import_one)
         self._drop.files_dropped.connect(self._import_many)
         self._browse_btn.clicked.connect(self._browse_for_clips)
-        self._hero_output_btn.clicked.connect(self._open_last_output_folder)
-        self._export_btn.clicked.connect(self._start_export)
-        self._export_all_btn.clicked.connect(self._start_batch_export)
-        self._cancel_btn.clicked.connect(self._cancel_active)
+        self._hero_output_btn.clicked.connect(self._ctl.open_last_output_folder)
+        self._export_btn.clicked.connect(self._ctl.start_export)
+        self._export_all_btn.clicked.connect(self._ctl.start_batch_export)
+        self._cancel_btn.clicked.connect(self._ctl.cancel_active)
         self._player.canvas.viewport_dragged.connect(self._on_manual_drag)
         self._player.position_changed.connect(self._sync_track_pos)
         self._player.trim_changed.connect(self._on_trim_changed)
@@ -797,22 +787,22 @@ class MainWindow(MainControllerMixin, QMainWindow):
                 f"{self._preset.resolution_label} delivery · {_fmt_duration(kept)} kept."
             )
 
-            if self._encode_worker and self._encode_worker.isRunning():
+            if self._ctl.encode_worker and self._ctl.encode_worker.isRunning():
                 notice = "Export is running now. Keep the window open and Vertigo will finish the clip or queue automatically."
                 notice_tone = "accent"
-            elif self._subtitle_worker and self._subtitle_worker.isRunning():
+            elif self._ctl.subtitle_worker and self._ctl.subtitle_worker.isRunning():
                 notice = "Caption generation is running locally. Export will be ready again as soon as transcription finishes."
                 notice_tone = "accent"
-            elif self._detect_worker and self._detect_worker.isRunning():
+            elif self._ctl.detect_worker and self._ctl.detect_worker.isRunning():
                 notice = "Smart Track is analyzing subjects and scene cuts locally."
                 notice_tone = "accent"
-            elif self._mode is ReframeMode.SMART_TRACK and not self._track_points:
+            elif self._mode is ReframeMode.SMART_TRACK and not self._ctl.track_points:
                 notice = "Next step: run Find subjects for guided framing, or switch to Center crop if you want the fastest export."
                 notice_tone = "warning"
             elif self._mode is ReframeMode.MANUAL:
                 notice = "Next step: drag the crop frame in the preview until the composition feels right, then export."
             elif (
-                self._current_entry.id in self._clip_subs
+                self._current_entry.id in self._ctl.clip_subs
                 and self._subtitle_choice
                 and self._subtitle_choice.burn_in
             ):
@@ -838,10 +828,10 @@ class MainWindow(MainControllerMixin, QMainWindow):
         tone: str | None = None
         if not self._info:
             text = "Load a clip to preview export progress, encoder notes, and the save destination here."
-        elif self._batch_running:
+        elif self._ctl.batch_running:
             text = "Queue export is active. Each pending clip will run in order and report progress here."
             tone = "accent"
-        elif self._last_output_path:
+        elif self._ctl.last_output_path:
             text = "Your latest export is ready below. Reveal it in the folder or export again after making more adjustments."
             tone = "success"
         else:
@@ -870,11 +860,11 @@ class MainWindow(MainControllerMixin, QMainWindow):
             self._browse_btn.setText("Import clips")
             self._meta_label.setProperty("tone", None)
 
-        has_output = self._last_output_path is not None
+        has_output = self._ctl.last_output_path is not None
         self._hero_output_btn.setVisible(has_output)
         if has_output:
             self._hero_output_btn.setText(
-                "Reveal queue folder" if self._last_output_path.is_dir() else "Reveal export"
+                "Reveal queue folder" if self._ctl.last_output_path.is_dir() else "Reveal export"
             )
 
         self._meta_label.style().unpolish(self._meta_label)
@@ -902,14 +892,14 @@ class MainWindow(MainControllerMixin, QMainWindow):
                 self._refresh_detection_actions()
                 self._refresh_overview()
                 return
-            if not self._track_points:
-                if self._suppress_auto_detect:
+            if not self._ctl.track_points:
+                if self._ctl.suppress_auto_detect:
                     self._set_detect_status("Smart Track will analyze this clip during batch export.", tone="accent")
                 else:
-                    self._run_detect()
+                    self._ctl.run_detect()
             else:
                 self._set_detect_status(
-                    f"Subject tracking ready: {len(self._track_points)} keyframes.",
+                    f"Subject tracking ready: {len(self._ctl.track_points)} keyframes.",
                     tone="success",
                 )
         else:
@@ -927,12 +917,12 @@ class MainWindow(MainControllerMixin, QMainWindow):
     def _refresh_detection_actions(self) -> None:
         if not hasattr(self, "_detect_btn"):
             return
-        running = bool(self._detect_worker and self._detect_worker.isRunning())
+        running = bool(self._ctl.detect_worker and self._ctl.detect_worker.isRunning())
         can_analyze = self._info is not None and not running
         self._detect_btn.setEnabled(can_analyze)
         self._detect_btn.setText(
             "Finding subjects\u2026" if running else
-            ("Run again" if self._track_points else "Find subjects")
+            ("Run again" if self._ctl.track_points else "Find subjects")
         )
         if hasattr(self, "_dryrun_btn"):
             self._dryrun_btn.setEnabled(self._info is not None and not running)
@@ -966,8 +956,8 @@ class MainWindow(MainControllerMixin, QMainWindow):
             self._toast.show_toast(f"Could not read that clip \u2014 {e}", kind="error")
             return
         self._info = info
-        self._track_points = []
-        self._scenes = []
+        self._ctl.track_points = []
+        self._ctl.scenes = []
         self._scene_label.setText("")
         if original_status is QueueStatus.PENDING:
             self._queue.update_status(
@@ -990,8 +980,8 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._on_mode_changed(self._mode)
         if hasattr(self, "_subs_panel"):
             self._subs_panel.set_clip_loaded(True)
-            self._subs_panel.set_srt_path(self._clip_subs.get(entry.id))
-        self._kick_scene_detection(info.path)
+            self._subs_panel.set_srt_path(self._ctl.clip_subs.get(entry.id))
+        self._ctl.kick_scene_detection(info.path)
         if hasattr(self, "_overlays_panel"):
             self._overlays_panel.set_duration(info.duration)
         self._refresh_progress_hint()
@@ -1011,9 +1001,9 @@ class MainWindow(MainControllerMixin, QMainWindow):
             parts.append(f"{failed} failed")
         self._queue_count.setText("  \u00b7  ".join(parts))
         busy = bool(
-            (self._encode_worker and self._encode_worker.isRunning()) or
-            (self._detect_worker and self._detect_worker.isRunning()) or
-            self._batch_running
+            (self._ctl.encode_worker and self._ctl.encode_worker.isRunning()) or
+            (self._ctl.detect_worker and self._ctl.detect_worker.isRunning()) or
+            self._ctl.batch_running
         )
         self._export_all_btn.setEnabled(pending > 0 and not busy)
         self._refresh_overview()
@@ -1059,12 +1049,12 @@ class MainWindow(MainControllerMixin, QMainWindow):
     def _clear_active_clip(self) -> None:
         self._current_entry = None
         self._info = None
-        self._track_points = []
-        self._scenes = []
+        self._ctl.track_points = []
+        self._ctl.scenes = []
         self._scene_label.setText("")
         self._set_detect_status("Load a clip to find faces and scene cuts.")
-        if self._scene_worker and self._scene_worker.isRunning():
-            self._scene_worker.cancel()
+        if self._ctl.scene_worker and self._ctl.scene_worker.isRunning():
+            self._ctl.scene_worker.cancel()
         self._player.set_shot_boundaries([])
         self._player.clear()
         self._preview_stack.setCurrentWidget(self._drop)
@@ -1076,7 +1066,7 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._set_export_status("Idle")
         self._log.clear()
         self._log.hide()
-        if not self._last_output_path:
+        if not self._ctl.last_output_path:
             self._output_row.hide()
         self._refresh_platform_notice()
         self._refresh_detection_actions()
@@ -1092,9 +1082,9 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._manual_x = x
 
     def _sync_track_pos(self, t: float) -> None:
-        if self._mode is not ReframeMode.SMART_TRACK or not self._track_points:
+        if self._mode is not ReframeMode.SMART_TRACK or not self._ctl.track_points:
             return
-        nearest = min(self._track_points, key=lambda p: abs(p.t - t))
+        nearest = min(self._ctl.track_points, key=lambda p: abs(p.t - t))
         self._player.set_track_x(nearest.x)
 
     def _on_trim_changed(self, low: float, high: float) -> None:
@@ -1117,23 +1107,21 @@ class MainWindow(MainControllerMixin, QMainWindow):
         self._overlays = overlays
 
     # Worker lifecycle, batch driver, and per-worker signal handlers live
-    # in MainControllerMixin (ui/main_controller.py). They continue to
-    # read and write state on this window via self.* — the split is
-    # purely file-level so no call sites or public names change.
+    # on self._ctl (ui/main_controller.py). Public API the window calls
+    # into: run_transcribe, on_subs_cleared, run_detect, start_export,
+    # run_dry, start_batch_export, cancel_active, kick_scene_detection,
+    # open_last_output_folder, shutdown, has_running_worker.
+
+    def _set_export_status(self, text: str, tone: str | None = None) -> None:
+        """Status-pill label under the progress bar. UI helper used by
+        the controller's worker callbacks and by _clear_active_clip."""
+        if hasattr(self, "_export_status"):
+            self._export_status.setText(text)
+            self._export_status.setProperty("tone", tone)
+            self._export_status.style().unpolish(self._export_status)
+            self._export_status.style().polish(self._export_status)
 
     # --------------------------------------------- lifecycle
     def closeEvent(self, event: QCloseEvent) -> None:
-        self._cancel_active()
-        # Scene detection is fire-and-forget and not included in
-        # _cancel_active, so ask it to stop explicitly before we join.
-        if self._scene_worker and self._scene_worker.isRunning():
-            self._scene_worker.cancel()
-        for worker in (
-            self._encode_worker,
-            self._detect_worker,
-            self._subtitle_worker,
-            self._scene_worker,
-        ):
-            if worker is not None and worker.isRunning():
-                worker.wait(1500)
+        self._ctl.shutdown(1500)
         super().closeEvent(event)
