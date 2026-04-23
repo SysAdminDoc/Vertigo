@@ -1,17 +1,17 @@
 <div align="center">
 
-<img src="assets/icon.png" alt="Kiln" width="140"/>
+<img src="assets/icon.png" alt="Vertigo" width="140"/>
 
-# Kiln
+# Vertigo
 
-**A premium kiln for short-form vertical video.**
+**Vertical video studio for short-form creators.**
 
-![version](https://img.shields.io/badge/version-0.5.1-cba6f7?style=for-the-badge)
+![version](https://img.shields.io/badge/version-0.6.0-cba6f7?style=for-the-badge)
 ![license](https://img.shields.io/badge/license-MIT-a6e3a1?style=for-the-badge)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-89b4fa?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.10%2B-f9e2af?style=for-the-badge)
 
-Fire raw footage into polished 9:16 for YouTube Shorts, TikTok, and Instagram Reels.
+From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 9:16 for YouTube Shorts, TikTok, and Instagram Reels.
 
 </div>
 
@@ -36,14 +36,14 @@ Fire raw footage into polished 9:16 for YouTube Shorts, TikTok, and Instagram Re
 - **Live crop viewport** overlaid on the preview player so you see the target frame before rendering.
 - **Async FFmpeg encoding** with real-time progress bar and a scrolling log panel.
 - **Turnkey bootstrap** — single-command launch, auto-installs missing Python deps on first run.
-- **Binary builds** — `pyinstaller --clean kiln.spec` produces single-file Windows, macOS `.app`, and Linux exes. GitHub Actions workflow builds all three on every tag push (or `workflow_dispatch`) and uploads to a draft release via `gh release upload --clobber`.
+- **Binary builds** — `pyinstaller --clean vertigo.spec` produces single-file Windows, macOS `.app`, and Linux exes. GitHub Actions workflow builds all three on every tag push (or `workflow_dispatch`) and uploads to a draft release via `gh release upload --clobber`.
 
 ## Install
 
 ```bash
-git clone https://github.com/SysAdminDoc/Kiln.git
-cd Kiln
-python kiln.py
+git clone https://github.com/SysAdminDoc/Vertigo.git
+cd Vertigo
+python vertigo.py
 ```
 
 First run bootstraps PyQt6, OpenCV, NumPy, Pillow, MediaPipe, and PySceneDetect. You must also have **FFmpeg** on `PATH`:
@@ -59,7 +59,7 @@ sudo apt install ffmpeg
 
 ## Use
 
-1. Launch `python kiln.py`.
+1. Launch `python vertigo.py`.
 2. Drop a video on the preview area (or click to browse).
 3. Pick a platform preset (Shorts / TikTok / Reels / Square).
 4. Pick a reframe mode. For Smart Track, MediaPipe scans the clip and returns tracking keyframes.
@@ -68,8 +68,8 @@ sudo apt install ffmpeg
 ## Architecture
 
 ```
-kiln.py                   entry + dependency bootstrap
-kiln.spec                 PyInstaller build spec (single-file, per-OS icon)
+vertigo.py                entry + dependency bootstrap
+vertigo.spec              PyInstaller build spec (single-file, per-OS icon)
 .github/workflows/build.yml  Multi-OS CI + GitHub Release upload
 core/
   probe.py                ffprobe wrapper (VideoInfo dataclass)
@@ -103,6 +103,7 @@ assets/
   icon.svg / icon.png / icon.ico + size variants (16/32/48/128/256/512)
   wordmark.svg           typography-focused brand wordmark
   build_icons.py         procedural Pillow renderer (SVG + PNG + ICO)
+  runtime_hook_mp.py     PyInstaller fork-bomb guard (freeze_support)
   logo_prompts.md        5 AI image prompts for high-end brand generation
 ```
 
@@ -119,10 +120,10 @@ assets/
 
 ```bash
 pip install pyinstaller
-pyinstaller --clean kiln.spec
-# dist/Kiln.exe   (Windows)
-# dist/Kiln.app   (macOS)
-# dist/Kiln       (Linux)
+pyinstaller --clean vertigo.spec
+# dist/Vertigo.exe   (Windows)
+# dist/Vertigo.app   (macOS)
+# dist/Vertigo       (Linux)
 ```
 
 Or push a tag and let CI build all three — see `.github/workflows/build.yml`. A `workflow_dispatch` run with a tag input lands three artifacts on a draft release.

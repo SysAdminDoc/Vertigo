@@ -44,7 +44,7 @@ class TitleBar(QWidget):
             mark.setText("\u25cf")
             mark.setObjectName("brandDot")
 
-        brand = QLabel("Kiln")
+        brand = QLabel("Vertigo")
         brand.setObjectName("brand")
         brand_wrap.addWidget(mark)
         brand_wrap.addWidget(brand)
@@ -73,7 +73,7 @@ class TitleBar(QWidget):
         self._close = self._make_ctl("\u2715", close=True)
         self._min.setToolTip("Minimize")
         self._max.setToolTip("Maximize or restore")
-        self._close.setToolTip("Close Kiln")
+        self._close.setToolTip("Close Vertigo")
         self._min.setAccessibleName("Minimize window")
         self._max.setAccessibleName("Maximize or restore window")
         self._close.setAccessibleName("Close window")

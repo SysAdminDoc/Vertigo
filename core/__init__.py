@@ -1,4 +1,4 @@
-"""Kiln core — reframing, detection, encoding."""
+"""Vertigo core — reframing, detection, encoding."""
 
 from .presets import PRESETS, Preset
 from .probe import VideoInfo, probe

@@ -1,9 +1,9 @@
-# PyInstaller spec — Kiln single-file build.
+# PyInstaller spec — Vertigo single-file build.
 # Build:
-#   pyinstaller --clean kiln.spec
+#   pyinstaller --clean vertigo.spec
 # Output:
-#   dist/Kiln.exe          (Windows)
-#   dist/Kiln / Kiln.app   (Linux / macOS)
+#   dist/Vertigo.exe                (Windows)
+#   dist/Vertigo / Vertigo.app      (Linux / macOS)
 
 # -*- mode: python ; coding: utf-8 -*-
 
@@ -70,7 +70,7 @@ excludes = [
 
 
 a = Analysis(
-    ["kiln.py"],
+    ["vertigo.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
@@ -97,7 +97,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="Kiln",
+    name="Vertigo",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -117,12 +117,12 @@ exe = EXE(
 if sys.platform == "darwin":
     app = BUNDLE(
         exe,
-        name="Kiln.app",
+        name="Vertigo.app",
         icon=icon_file,
-        bundle_identifier="com.sysadmindoc.kiln",
+        bundle_identifier="com.sysadmindoc.vertigo",
         info_plist={
-            "CFBundleShortVersionString": "0.5.1",
-            "CFBundleVersion": "0.5.1",
+            "CFBundleShortVersionString": "0.6.0",
+            "CFBundleVersion": "0.6.0",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },

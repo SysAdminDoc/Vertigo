@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Kiln v0.5.1 — a premium kiln for short-form vertical video.
+"""Vertigo v0.6.0 — vertical video studio for short-form creators.
 
-Takes raw footage of any shape and fires it into polished 9:16 for
-YouTube Shorts, TikTok, and Instagram Reels.
+From the Latin *vertere*, "to turn." Turns raw footage of any shape into
+polished 9:16 for YouTube Shorts, TikTok, and Instagram Reels.
 
 Turnkey entry: bootstraps dependencies on first run, then launches the GUI.
 """
@@ -14,7 +14,7 @@ from __future__ import annotations
 # the entry point of a frozen (PyInstaller) build on Windows. Without it,
 # any library that uses Python's multiprocessing module (mediapipe, cv2,
 # torch-ish backends) will call sys.executable to spawn a worker — and
-# sys.executable is Kiln.exe itself, causing the whole app to relaunch
+# sys.executable is Vertigo.exe itself, causing the whole app to relaunch
 # recursively (the "PyInstaller fork bomb"). It is a no-op at first call
 # in the parent; it prevents re-execution of main() in each child.
 # ----------------------------------------------------------------
@@ -27,8 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-__version__ = "0.5.1"
-APP_NAME = "Kiln"
+__version__ = "0.6.0"
+APP_NAME = "Vertigo"
 
 _REQUIRED = [
     ("PyQt6",        "PyQt6>=6.7.0"),
@@ -88,7 +88,7 @@ def _bootstrap() -> None:
         if missing:
             sys.stderr.write(
                 f"[{APP_NAME}] bundled import failed: {', '.join(missing)}\n"
-                f"  This binary is incomplete. Please reinstall Kiln.\n"
+                f"  This binary is incomplete. Please reinstall {APP_NAME}.\n"
             )
             sys.exit(4)
         return
@@ -118,6 +118,19 @@ def _check_ffmpeg() -> None:
             f"    winget install Gyan.FFmpeg\n"
         )
         sys.exit(3)
+
+
+def _load_saved_theme(QSettings) -> str:
+    """Chained fallback: Vertigo → Kiln → ReelForge → 'system'.
+
+    Carries theme preference through every historical project name so
+    long-time users keep their chosen appearance across renames.
+    """
+    for org, app in (("Vertigo", "Vertigo"), ("Kiln", "Kiln"), ("ReelForge", "ReelForge")):
+        value = QSettings(org, app).value("theme", None)
+        if value is not None:
+            return str(value)
+    return "system"
 
 
 # ---------------------------------------------------------------- main
@@ -151,12 +164,7 @@ def main() -> int:
     if not icon.isNull():
         app.setWindowIcon(icon)
 
-    settings = QSettings("Kiln", "Kiln")
-    legacy = QSettings("ReelForge", "ReelForge")
-    saved = settings.value("theme", None)
-    if saved is None:
-        saved = legacy.value("theme", "system", type=str)
-    theme_pref = sanitize_theme_preference(saved)
+    theme_pref = sanitize_theme_preference(_load_saved_theme(QSettings))
     apply_app_theme(app, theme_pref)
 
     win = MainWindow()

@@ -220,7 +220,7 @@ def _system_is_dark() -> bool:
 def current_palette() -> ThemePalette:
     app = QApplication.instance()
     if app is not None:
-        theme_id = app.property("kilnThemeId")
+        theme_id = app.property("vertigoThemeId")
         if isinstance(theme_id, str) and theme_id in THEMES:
             return THEMES[theme_id]
     return THEMES[resolved_theme_id()]
@@ -229,7 +229,7 @@ def current_palette() -> ThemePalette:
 def app_theme_preference() -> str:
     app = QApplication.instance()
     if app is not None:
-        pref = app.property("kilnThemePreference")
+        pref = app.property("vertigoThemePreference")
         if isinstance(pref, str):
             return sanitize_theme_preference(pref)
     return SYSTEM_THEME_ID
@@ -238,8 +238,8 @@ def app_theme_preference() -> str:
 def apply_app_theme(app: QApplication, preference: str | None) -> ThemePalette:
     pref = sanitize_theme_preference(preference)
     theme = THEMES[resolved_theme_id(pref)]
-    app.setProperty("kilnThemePreference", pref)
-    app.setProperty("kilnThemeId", theme.id)
+    app.setProperty("vertigoThemePreference", pref)
+    app.setProperty("vertigoThemeId", theme.id)
     app.setPalette(build_qpalette(theme))
     app.setStyleSheet(build_stylesheet(pref))
     return theme

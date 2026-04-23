@@ -1,4 +1,4 @@
-"""Kiln main window — premium composition, batch queue driver."""
+"""Vertigo main window — premium composition, batch queue driver."""
 
 from __future__ import annotations
 
@@ -52,12 +52,12 @@ from .widgets import GlassPanel, ModeCard, Toast
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Kiln")
+        self.setWindowTitle("Vertigo")
         self.setMinimumSize(1120, 720)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
         # state -------------------------------------------------------
-        self._settings = QSettings("Kiln", "Kiln")
+        self._settings = QSettings("Vertigo", "Vertigo")
         self._theme_preference = sanitize_theme_preference(
             self._settings.value("theme", "system", type=str)
         )
@@ -668,7 +668,7 @@ class MainWindow(QMainWindow):
         self._set_meta_text("No clip loaded")
         self._export_btn.setEnabled(False)
         self._export_all_btn.setEnabled(False)
-        self._titlebar.set_subtitle("The kiln for vertical video")
+        self._titlebar.set_subtitle("Vertical video studio")
         self._export_progress.setValue(0)
         self._export_progress.setFormat("Idle")
         self._log.clear()
@@ -722,7 +722,7 @@ class MainWindow(QMainWindow):
             return
         if self._subtitle_worker and self._subtitle_worker.isRunning():
             return
-        out = self._info.path.with_suffix(".kiln.srt")
+        out = self._info.path.with_suffix(".vertigo.srt")
         self._subs_panel.set_running(True)
         self._subs_panel.set_status(
             f"Transcribing {self._info.path.name} with whisper-{model}..."

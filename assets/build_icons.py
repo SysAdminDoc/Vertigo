@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the Kiln brand mark to raster variants.
+"""Render the Vertigo brand mark to raster variants.
 
 Run from the project root:
 

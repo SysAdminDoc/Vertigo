@@ -1,6 +1,23 @@
 # Changelog
 
-All notable changes to Kiln are documented here.
+All notable changes to Vertigo are documented here.
+
+## [0.6.0] - 2026-04-22
+
+### Changed
+- **Renamed the project from Kiln to Vertigo.** Vertigo, from the Latin *vertere* ("to turn"), captures the tool's core verb: turning horizontal footage into vertical. It also lends the brand a cinematic identity — Hitchcock-era graphic design language (concentric circles, dolly-zoom perspective) translates cleanly into the mauve-to-pink accent system.
+- Entry point is now `python vertigo.py` (was `python kiln.py`). PyInstaller output binaries are `Vertigo.exe` / `Vertigo.app` / `Vertigo`. macOS bundle identifier is `com.sysadmindoc.vertigo`.
+- `QSettings` organization key is now `Vertigo`. Theme preference lookup walks a chained fallback: `Vertigo → Kiln → ReelForge → "system"`, so users who installed under any prior name keep their appearance.
+- Qt app-property keys renamed (`kilnThemeId` → `vertigoThemeId`, same for `kilnThemePreference`).
+- Cache / sidecar paths renamed (`.kiln/` → `.vertigo/`, `*.kiln.srt` → `*.vertigo.srt`).
+- Titlebar brand label reads **Vertigo**; subtitle reads "Vertical video studio."
+- Wordmark SVG redrawn for `VERTIGO`; `assets/logo_prompts.md` rewritten around the vertigo / rotation / dolly-zoom metaphor.
+- README, architecture tree, install instructions, and CHANGELOG header updated.
+
+### Verified
+- App boots under every theme with the new brand mark, 6 sidebar tabs intact.
+- End-to-end encode still produces a clean MP4 in all reframe modes.
+- No stale `Kiln` / `kiln` references remain outside the deliberate legacy-fallback chain and historical changelog entries.
 
 ## [0.5.1] - 2026-04-22
 

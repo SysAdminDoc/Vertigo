@@ -42,13 +42,13 @@ desktop.ini
 # PyInstaller
 *.manifest
 *.spec
-!kiln.spec
+!vertigo.spec
 
 # Logs & cache
 *.log
 .cache/
-.kiln/
-kiln_cache/
+.vertigo/
+vertigo_cache/
 
 # AI working files — local only, never commit
 CLAUDE.md
