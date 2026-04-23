@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QImage, QPainter, QPalette
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication
 
 
@@ -241,6 +246,9 @@ def apply_app_theme(app: QApplication, preference: str | None) -> ThemePalette:
     app.setProperty("vertigoThemePreference", pref)
     app.setProperty("vertigoThemeId", theme.id)
     app.setPalette(build_qpalette(theme))
+    # Bake glyph PNGs first so the stylesheet can reference real files —
+    # QSS that points at a non-existent image silently renders nothing.
+    ensure_glyph_assets(theme.id)
     app.setStyleSheet(build_stylesheet(pref))
     return theme
 
@@ -285,6 +293,130 @@ def qcolor(hex_or_rgba: str) -> QColor:
     return QColor(value)
 
 
+# ---------------------------------------------------------------- glyph cache
+# Qt's QSS engine wants a concrete image file for indicator glyphs
+# (::indicator image:, ::down-arrow image:). Data-URIs are flaky across Qt
+# versions on Windows, so we bake one PNG per (theme, glyph) to a writable
+# cache on disk and point QSS at it with forward-slash URLs.
+#
+# Each SVG in assets/ uses `currentColor` so a single source can be coloured
+# at bake time — we substitute the colour into the source text before feeding
+# it to QSvgRenderer and rendering to a QImage.
+
+_GLYPH_SOURCES: dict[str, str] = {
+    # glyph key -> asset filename; colour role is chosen per caller below
+    "check":        "check.svg",
+    "check_minus":  "check_minus.svg",
+}
+
+# Rendered at 2x the logical size so the QSS image stays crisp on HiDPI.
+_GLYPH_PX = 32
+
+
+def _cache_root() -> Path:
+    """Writable glyph-cache directory.
+
+    Mirrors ``vertigo._log_dir()`` so the glyphs live next to crash.log in
+    %LOCALAPPDATA%/Vertigo (or the platform equivalent). Replicated here to
+    avoid importing the entry module.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Logs")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    root = Path(base) / "Vertigo" / "glyphs"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        root = Path(os.environ.get("TEMP") or "/tmp") / "vertigo-glyphs"
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _asset_source(filename: str) -> str | None:
+    """Read an SVG from the project's assets directory (repo or frozen bundle)."""
+    try:
+        from .assets import asset_root
+    except Exception:
+        return None
+    path = asset_root() / filename
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def _palette_hash(theme: ThemePalette, colours: tuple[str, ...]) -> str:
+    """Short hash over the exact hex values used for this cache entry.
+
+    Keyed so that edits to a single colour in a theme bust only that theme's
+    PNG — not the others.
+    """
+    payload = "|".join(colours).encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()[:8]
+
+
+def _render_tinted_svg(source: str, hex_color: str, size: int = _GLYPH_PX) -> QImage:
+    tinted = source.replace("currentColor", hex_color)
+    renderer = QSvgRenderer(tinted.encode("utf-8"))
+    img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(img)
+    try:
+        renderer.render(painter)
+    finally:
+        painter.end()
+    return img
+
+
+def ensure_glyph_assets(theme_id: str) -> dict[str, Path]:
+    """Bake the per-theme glyph PNGs and return a map of keys to cached paths.
+
+    Safe to call on every theme apply — existing files are reused without
+    repainting. Missing source SVGs or render failures are tolerated: the
+    affected key is simply omitted from the returned dict and QSS falls
+    back to a bare indicator.
+    """
+    theme = THEMES.get(theme_id)
+    if theme is None:
+        return {}
+
+    # (glyph key, hex color)
+    recipes: tuple[tuple[str, str], ...] = (
+        ("check",       theme.accent_text),
+        ("check_minus", theme.accent_text),
+    )
+    digest = _palette_hash(theme, tuple(c for _, c in recipes))
+    out_dir = _cache_root() / theme_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    results: dict[str, Path] = {}
+    for key, colour in recipes:
+        filename = _GLYPH_SOURCES.get(key)
+        if not filename:
+            continue
+        out_path = out_dir / f"{key}-{digest}.png"
+        if not out_path.exists():
+            source = _asset_source(filename)
+            if source is None:
+                continue
+            try:
+                img = _render_tinted_svg(source, colour)
+                if not img.save(str(out_path), "PNG"):
+                    continue
+            except Exception:
+                continue
+        results[key] = out_path
+    return results
+
+
+def _qss_path(p: Path) -> str:
+    """Forward-slash absolute path for QSS `url(...)` — Windows-safe."""
+    return str(p).replace("\\", "/")
+
+
 def build_stylesheet(preference: str | None = None) -> str:
     """Compose Vertigo's QSS from theme tokens.
 
@@ -299,7 +431,16 @@ def build_stylesheet(preference: str | None = None) -> str:
       - Backgrounds carry visual layering: base (resting) → mantle (elevated)
         → surface0 (raised) → surface1 (pressed/hovered raised)
     """
-    t = THEMES[resolved_theme_id(preference)]
+    theme_id = resolved_theme_id(preference)
+    t = THEMES[theme_id]
+
+    glyphs = ensure_glyph_assets(theme_id)
+    check_url      = _qss_path(glyphs["check"])       if "check"       in glyphs else ""
+    minus_url      = _qss_path(glyphs["check_minus"]) if "check_minus" in glyphs else ""
+
+    check_img   = f"image: url({check_url});"   if check_url   else ""
+    minus_img   = f"image: url({minus_url});"   if minus_url   else ""
+
     return f"""
 * {{
     font-family: "Segoe UI Variable Display", "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
@@ -1015,10 +1156,28 @@ QCheckBox::indicator:hover {{
 QCheckBox::indicator:checked {{
     background: {t.accent};
     border-color: {t.accent};
+    {check_img}
 }}
 QCheckBox::indicator:checked:hover {{
     background: {t.accent_soft};
     border-color: {t.accent_soft};
+    {check_img}
+}}
+QCheckBox::indicator:indeterminate {{
+    background: {t.accent};
+    border-color: {t.accent};
+    {minus_img}
+}}
+QCheckBox::indicator:indeterminate:hover {{
+    background: {t.accent_soft};
+    border-color: {t.accent_soft};
+    {minus_img}
+}}
+QCheckBox::indicator:checked:disabled,
+QCheckBox::indicator:indeterminate:disabled {{
+    background: {t.surface1};
+    border-color: {t.surface1};
+    {check_img}
 }}
 QCheckBox::indicator:disabled {{
     background: {t.mantle};

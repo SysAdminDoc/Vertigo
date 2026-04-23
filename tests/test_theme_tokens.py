@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import unittest
 
-from ui.theme import SYSTEM_THEME_ID, THEMES, qcolor, resolved_theme_id, sanitize_theme_preference
-from ui.theme import build_stylesheet
+from ui.theme import (
+    SYSTEM_THEME_ID,
+    THEMES,
+    apply_app_theme,
+    build_stylesheet,
+    ensure_glyph_assets,
+    qcolor,
+    resolved_theme_id,
+    sanitize_theme_preference,
+)
 
 
 def _rgb(hex_color: str) -> tuple[float, float, float]:
@@ -112,6 +122,38 @@ class ThemeTokenTests(unittest.TestCase):
                 with self.subTest(theme=theme_id, color=color_name):
                     self.assertGreaterEqual(_contrast(getattr(theme, color_name), theme.base), 3.0)
                     self.assertGreaterEqual(_contrast(getattr(theme, color_name), theme.mantle), 3.0)
+
+
+class GlyphCacheTests(unittest.TestCase):
+    """Rendering PNG glyphs needs a QApplication; create one lazily."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+        cls._app = QApplication.instance() or QApplication(sys.argv)
+
+    def test_apply_app_theme_writes_checkbox_glyphs_for_every_theme(self) -> None:
+        # Each explicit theme must produce a cached 'check' PNG on disk —
+        # otherwise the QCheckBox indicator falls back to bare accent fill.
+        for theme_id in THEMES:
+            with self.subTest(theme=theme_id):
+                apply_app_theme(self._app, theme_id)
+                glyphs = ensure_glyph_assets(theme_id)
+                self.assertIn("check", glyphs)
+                self.assertTrue(glyphs["check"].exists(), glyphs["check"])
+                self.assertGreater(glyphs["check"].stat().st_size, 0)
+                self.assertIn("check_minus", glyphs)
+                self.assertTrue(glyphs["check_minus"].exists())
+
+    def test_glyph_cache_is_reused_between_calls(self) -> None:
+        # Second call must not re-bake: mtime stable for an existing file.
+        apply_app_theme(self._app, "mocha")
+        first = ensure_glyph_assets("mocha")["check"]
+        mtime_before = first.stat().st_mtime
+        again = ensure_glyph_assets("mocha")["check"]
+        self.assertEqual(first, again)
+        self.assertEqual(mtime_before, again.stat().st_mtime)
 
 
 if __name__ == "__main__":
