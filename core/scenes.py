@@ -47,37 +47,38 @@ def _histogram_scenes(path: Path, min_len: float) -> list[tuple[float, float]]:
     if not cap.isOpened():
         return []
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    duration = total / fps if fps else 0.0
-    if duration <= 0:
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        duration = total / fps if fps else 0.0
+        if duration <= 0:
+            return []
+
+        sample_step = max(1, int(round(fps / 4.0)))
+        prev_hist = None
+        cuts: list[float] = [0.0]
+
+        idx = 0
+        while idx < total:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            small = cv2.resize(frame, (160, 90))
+            hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+            hist = cv2.calcHist([hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
+            cv2.normalize(hist, hist)
+            if prev_hist is not None:
+                corr = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)
+                if corr < 0.55:
+                    t = idx / fps
+                    if t - cuts[-1] >= min_len:
+                        cuts.append(t)
+            prev_hist = hist
+            idx += sample_step
+    finally:
         cap.release()
-        return []
 
-    sample_step = max(1, int(round(fps / 4.0)))
-    prev_hist = None
-    cuts: list[float] = [0.0]
-
-    idx = 0
-    while idx < total:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            break
-        small = cv2.resize(frame, (160, 90))
-        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-        hist = cv2.calcHist([hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
-        cv2.normalize(hist, hist)
-        if prev_hist is not None:
-            corr = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)
-            if corr < 0.55:
-                t = idx / fps
-                if t - cuts[-1] >= min_len:
-                    cuts.append(t)
-        prev_hist = hist
-        idx += sample_step
-
-    cap.release()
     cuts.append(duration)
 
     scenes: list[tuple[float, float]] = []

@@ -14,6 +14,8 @@ Four placement presets:
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -57,31 +59,48 @@ class TextOverlay:
 
 def build_filter_chain(overlays: list[TextOverlay]) -> str:
     """Return a comma-joined drawtext chain for all non-empty overlays."""
-    parts = [_overlay_filter(o) for o in overlays if o.text.strip() and o.duration > 0.05]
+    parts = [_overlay_filter(o) for o in overlays if _is_usable(o)]
     return ",".join(p for p in parts if p)
+
+
+def _is_usable(o: TextOverlay) -> bool:
+    if not o.text.strip():
+        return False
+    if not (math.isfinite(o.start) and math.isfinite(o.end)):
+        return False
+    if o.duration <= 0.05:
+        return False
+    return True
 
 
 def _overlay_filter(o: TextOverlay) -> str:
     text = _escape_text(o.text)
     x, y = _POSITIONS[o.position]
 
+    # Clamp user-tunable numbers into sane ranges so FFmpeg never receives
+    # negative font sizes, exploding border widths, or NaN time windows.
+    font_size = max(8, min(512, int(o.size)))
+    stroke_width = max(0, min(32, int(o.stroke_width)))
+    start = max(0.0, float(o.start))
+    end = max(start, float(o.end))
+
     args: list[str] = [
         f"drawtext=text='{text}'",
         f"x={x}",
         f"y={y}",
-        f"fontsize={o.size}",
+        f"fontsize={font_size}",
         f"fontcolor={_ffmpeg_color(o.color)}",
-        f"enable='between(t,{o.start:.3f},{o.end:.3f})'",
+        f"enable='between(t,{start:.3f},{end:.3f})'",
         # line spacing feels right for mobile at this weight
         "line_spacing=6",
     ]
 
-    if o.stroke and o.stroke_width > 0:
+    if o.stroke and stroke_width > 0:
         args.append(f"bordercolor={_ffmpeg_color(o.stroke_color)}")
-        args.append(f"borderw={o.stroke_width}")
+        args.append(f"borderw={stroke_width}")
 
     if o.background:
-        alpha = max(0.0, min(1.0, o.background_alpha))
+        alpha = max(0.0, min(1.0, float(o.background_alpha)))
         args.append("box=1")
         args.append(f"boxcolor={_ffmpeg_color(o.background_color)}@{alpha:.2f}")
         args.append("boxborderw=18")
@@ -89,14 +108,23 @@ def _overlay_filter(o: TextOverlay) -> str:
     return ":".join(args)
 
 
+_HEX_PATTERN = re.compile(r"^[0-9a-fA-F]{6}$")
+
+
 def _ffmpeg_color(hex_str: str) -> str:
-    """FFmpeg accepts both `0xRRGGBB` and `#RRGGBB`; normalize to 0x form."""
-    s = hex_str.strip()
+    """FFmpeg accepts both `0xRRGGBB` and `#RRGGBB`; normalize to 0x form.
+
+    Unknown / malformed input falls back to opaque white so a broken
+    colour field never corrupts the whole filter graph.
+    """
+    s = (hex_str or "").strip()
     if s.startswith("#"):
-        s = "0x" + s[1:]
-    elif not s.startswith("0x"):
-        s = "0x" + s
-    return s
+        s = s[1:]
+    elif s.lower().startswith("0x"):
+        s = s[2:]
+    if not _HEX_PATTERN.fullmatch(s):
+        return "0xFFFFFF"
+    return "0x" + s.upper()
 
 
 def _escape_text(text: str) -> str:

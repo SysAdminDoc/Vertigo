@@ -53,6 +53,10 @@ vertigo_cache/
 # Release artifacts (attached to GitHub Releases, not committed)
 Vertigo-*.zip
 Vertigo-*.tar.gz
+release-artifacts/
+
+# Scratch QA screenshots — prefixed with _ by the capture helper
+_*.png
 
 # AI working files — local only, never commit
 CLAUDE.md

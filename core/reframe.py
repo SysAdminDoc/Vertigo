@@ -180,12 +180,24 @@ def _plan_track(
     detection noise without introducing perceivable latency. Idea
     borrowed from bmezaris/RetargetVid (ICIP 2021).
     """
+    import math
+
     cw, ch = _crop_dims(info, tw, th)
     if not track_points:
         return _plan_center(info, tw, th, fps)
 
+    # Drop any track point with non-finite x or t before feeding FFmpeg's
+    # expression parser; a single NaN/Inf poisons the whole crop filter.
+    clean = [
+        p for p in track_points
+        if math.isfinite(getattr(p, "t", float("nan")))
+        and math.isfinite(getattr(p, "x", float("nan")))
+    ]
+    if not clean:
+        return _plan_center(info, tw, th, fps)
+
     max_x = max(0, info.width - cw)
-    pts = sorted(track_points, key=lambda p: p.t)
+    pts = sorted(clean, key=lambda p: p.t)
     pts = _smooth_track(pts, source_fps=info.fps)
     expr = _x_expression(pts, cw, info.width, max_x)
     vf = (

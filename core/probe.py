@@ -90,38 +90,58 @@ def probe(path: str | Path) -> VideoInfo:
         check=True,
         creationflags=_no_window_flags(),
     )
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"ffprobe returned malformed JSON for {path}: {e}") from e
 
-    video_stream = next((s for s in data["streams"] if s["codec_type"] == "video"), None)
-    audio_stream = next((s for s in data["streams"] if s["codec_type"] == "audio"), None)
+    streams = data.get("streams") or []
+    fmt = data.get("format") or {}
+
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
     if not video_stream:
         raise ValueError(f"No video stream in {path}")
 
-    width = int(video_stream["width"])
-    height = int(video_stream["height"])
-    codec = video_stream["codec_name"]
+    # Some exotic containers (MJPEG stills, corrupted MP4s) report missing
+    # width/height/codec keys. Treat those as a probe failure rather than
+    # crashing with a KeyError deep inside the GUI thread.
+    try:
+        width = int(video_stream.get("width") or 0)
+        height = int(video_stream.get("height") or 0)
+    except (TypeError, ValueError):
+        width = height = 0
+    if width <= 0 or height <= 0:
+        raise ValueError(f"ffprobe reported invalid dimensions {width}x{height} for {path}")
+    codec = str(video_stream.get("codec_name") or "unknown")
 
     r_fps = _parse_fps(video_stream.get("r_frame_rate", "0/1"))
     avg_fps = _parse_fps(video_stream.get("avg_frame_rate", "0/1"))
     fps = avg_fps or r_fps or 30.0
 
-    duration = float(data["format"].get("duration") or video_stream.get("duration") or 0.0)
-
-    start_time = 0.0
     try:
-        start_time = float(video_stream.get("start_time") or data["format"].get("start_time") or 0.0)
+        duration = float(fmt.get("duration") or video_stream.get("duration") or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
+
+    try:
+        start_time = float(video_stream.get("start_time") or fmt.get("start_time") or 0.0)
     except (TypeError, ValueError):
         start_time = 0.0
+
+    audio_codec = None
+    if audio_stream:
+        audio_codec = audio_stream.get("codec_name") or None
 
     return VideoInfo(
         path=path,
         width=width,
         height=height,
-        duration=duration,
+        duration=max(0.0, duration),
         fps=fps,
         codec=codec,
         has_audio=audio_stream is not None,
-        audio_codec=audio_stream["codec_name"] if audio_stream else None,
+        audio_codec=audio_codec,
         r_fps=r_fps,
         avg_fps=avg_fps,
         video_start_time=start_time,
@@ -129,15 +149,24 @@ def probe(path: str | Path) -> VideoInfo:
 
 
 def _parse_fps(raw: str) -> float:
+    import math
+
+    def _sanitise(value: float) -> float:
+        return value if math.isfinite(value) and value > 0 else 0.0
+
+    if not raw:
+        return 0.0
     if "/" in raw:
         num, den = raw.split("/", 1)
         try:
             n, d = float(num), float(den)
-            return n / d if d else 0.0
         except ValueError:
             return 0.0
+        if not d:
+            return 0.0
+        return _sanitise(n / d)
     try:
-        return float(raw)
+        return _sanitise(float(raw))
     except ValueError:
         return 0.0
 

@@ -1673,12 +1673,18 @@ class MainWindow(QMainWindow):
     # --------------------------------------------- lifecycle
     def closeEvent(self, event: QCloseEvent) -> None:
         self._cancel_active()
-        if self._encode_worker:
-            self._encode_worker.wait(1500)
-        if self._detect_worker:
-            self._detect_worker.wait(1500)
-        if self._subtitle_worker:
-            self._subtitle_worker.wait(1500)
+        # Scene detection is fire-and-forget and not included in
+        # _cancel_active, so ask it to stop explicitly before we join.
+        if self._scene_worker and self._scene_worker.isRunning():
+            self._scene_worker.cancel()
+        for worker in (
+            self._encode_worker,
+            self._detect_worker,
+            self._subtitle_worker,
+            self._scene_worker,
+        ):
+            if worker is not None and worker.isRunning():
+                worker.wait(1500)
         super().closeEvent(event)
 
 
