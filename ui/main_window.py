@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
 
         self._build_chrome()
         self._build_body()
-        self._wire()
+        self._ctl.wire()
         self._wire_system_theme()
         self._apply_theme(self._theme_preference, persist=False)
         self._on_mode_changed(ReframeMode.CENTER)
@@ -668,17 +668,10 @@ class MainWindow(QMainWindow):
         return panel
 
     # --------------------------------------------- wiring
-    def _wire(self) -> None:
-        self._drop.file_dropped.connect(self._import_one)
-        self._drop.files_dropped.connect(self._import_many)
-        self._browse_btn.clicked.connect(self._browse_for_clips)
-        self._hero_output_btn.clicked.connect(self._ctl.open_last_output_folder)
-        self._export_btn.clicked.connect(self._ctl.start_export)
-        self._export_all_btn.clicked.connect(self._ctl.start_batch_export)
-        self._cancel_btn.clicked.connect(self._ctl.cancel_active)
-        self._player.canvas.viewport_dragged.connect(self._on_manual_drag)
-        self._player.position_changed.connect(self._sync_track_pos)
-        self._player.trim_changed.connect(self._on_trim_changed)
+    # Signals are routed in MainController.wire() — see ui/main_controller.py.
+    # Window-side handlers (_import_one, _on_manual_drag, _sync_track_pos,
+    # _on_trim_changed, _browse_for_clips) are reached from the controller
+    # via self.win._foo; controller-side methods are reached via self.foo.
 
     # --------------------------------------------- preset
     def _choose_preset(self, pid: str) -> None:

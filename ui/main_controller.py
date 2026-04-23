@@ -99,6 +99,30 @@ class MainController(QObject):
         # export output tracking
         self.last_output_path: Path | None = None
 
+    # --------------------------------------------------------------- wiring
+    def wire(self) -> None:
+        """Route the top-level hero / player / drop-zone signals.
+
+        Signals emitted by widgets that are built inside the per-panel
+        ``_build_*`` helpers (detect button, dry-run button, subtitles
+        panel, open-output button) are still connected where the widgets
+        are constructed — those are local concerns and moving them up
+        here would force every build helper to expose another accessor.
+        What this method handles is the chrome-level surfaces that are
+        referenced by name on MainWindow.
+        """
+        w = self.win
+        w._drop.file_dropped.connect(w._import_one)
+        w._drop.files_dropped.connect(w._import_many)
+        w._browse_btn.clicked.connect(w._browse_for_clips)
+        w._hero_output_btn.clicked.connect(self.open_last_output_folder)
+        w._export_btn.clicked.connect(self.start_export)
+        w._export_all_btn.clicked.connect(self.start_batch_export)
+        w._cancel_btn.clicked.connect(self.cancel_active)
+        w._player.canvas.viewport_dragged.connect(w._on_manual_drag)
+        w._player.position_changed.connect(w._sync_track_pos)
+        w._player.trim_changed.connect(w._on_trim_changed)
+
     # --------------------------------------------------------------- status
     def has_running_worker(self) -> bool:
         for w in (self.detect_worker, self.encode_worker, self.subtitle_worker):
