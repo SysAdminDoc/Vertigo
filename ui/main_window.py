@@ -35,6 +35,7 @@ from .file_drop import FileDropZone
 from .main_controller import MainController, _fmt_duration
 from .output_panel import OutputChoice, OutputPanel
 from .overlays_panel import OverlaysPanel
+from .panels import add_overview_metric, build_tool_section
 from .subtitles_panel import SubtitleChoice, SubtitlesPanel
 from .theme import apply_app_theme, sanitize_theme_preference, theme_choices
 from .titlebar import TitleBar
@@ -269,7 +270,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row.setSpacing(12)
         row.addWidget(
-            self._build_tool_section(
+            build_tool_section(
                 "Look",
                 "Tonal adjustments are baked directly into the export.",
                 self._build_adjust_tab(compact=True),
@@ -277,7 +278,7 @@ class MainWindow(QMainWindow):
             1,
         )
         row.addWidget(
-            self._build_tool_section(
+            build_tool_section(
                 "Track",
                 "Analyze subjects locally when you want automated framing.",
                 self._build_track_tab(compact=True),
@@ -297,7 +298,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row.setSpacing(12)
         row.addWidget(
-            self._build_tool_section(
+            build_tool_section(
                 "Captions",
                 "Generate, style, and optionally burn captions into the export.",
                 self._build_subs_tab(compact=True),
@@ -305,7 +306,7 @@ class MainWindow(QMainWindow):
             1,
         )
         row.addWidget(
-            self._build_tool_section(
+            build_tool_section(
                 "Text",
                 "Add title cards, hooks, and lower thirds without leaving the main screen.",
                 self._build_overlays_tab(compact=True),
@@ -314,21 +315,6 @@ class MainWindow(QMainWindow):
         )
         panel.layout().addLayout(row)
         return panel
-
-    def _build_tool_section(self, title: str, body: str, widget: QWidget) -> QWidget:
-        host = QWidget()
-        host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        lay = QVBoxLayout(host)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
-        host.setToolTip(body)
-
-        title_lbl = QLabel(title)
-        title_lbl.setObjectName("formLabel")
-        lay.addWidget(title_lbl)
-
-        lay.addWidget(widget, 1)
-        return host
 
     def _build_overview_panel(self) -> QWidget:
         panel = GlassPanel("SESSION OVERVIEW")
@@ -349,10 +335,10 @@ class MainWindow(QMainWindow):
         metrics = QGridLayout()
         metrics.setHorizontalSpacing(10)
         metrics.setVerticalSpacing(4)
-        self._overview_preset = self._add_overview_metric(metrics, 0, 0, "Preset")
-        self._overview_mode = self._add_overview_metric(metrics, 0, 1, "Mode")
-        self._overview_trim = self._add_overview_metric(metrics, 0, 2, "Trim")
-        self._overview_queue = self._add_overview_metric(metrics, 0, 3, "Queue")
+        self._overview_preset = add_overview_metric(metrics,0, 0, "Preset")
+        self._overview_mode = add_overview_metric(metrics,0, 1, "Mode")
+        self._overview_trim = add_overview_metric(metrics,0, 2, "Trim")
+        self._overview_queue = add_overview_metric(metrics,0, 3, "Queue")
         panel.layout().addLayout(metrics)
 
         self._overview_notice = QLabel("")
@@ -360,21 +346,6 @@ class MainWindow(QMainWindow):
         self._overview_notice.setWordWrap(True)
         panel.layout().addWidget(self._overview_notice)
         return panel
-
-    def _add_overview_metric(self, lay: QGridLayout, row: int, col: int, label: str) -> QLabel:
-        host = QWidget()
-        host_lay = QVBoxLayout(host)
-        host_lay.setContentsMargins(0, 0, 0, 0)
-        host_lay.setSpacing(2)
-        title = QLabel(label)
-        title.setObjectName("formLabel")
-        value = QLabel("")
-        value.setObjectName("valueBright")
-        value.setWordWrap(True)
-        host_lay.addWidget(title)
-        host_lay.addWidget(value)
-        lay.addWidget(host, row, col)
-        return value
 
     def _build_preset_panel(self) -> QWidget:
         panel = GlassPanel("PLATFORM PRESET")
