@@ -30,6 +30,8 @@ class SubtitleWorker(QThread):
         height_px: int = 1920,
         model_name: str = DEFAULT_MODEL,
         language: str | None = None,
+        face_aware: bool = False,
+        letterbox: bool = False,
     ) -> None:
         super().__init__()
         self._source = Path(source)
@@ -38,6 +40,8 @@ class SubtitleWorker(QThread):
         self._height = height_px
         self._model = model_name
         self._language = language
+        self._face_aware = face_aware
+        self._letterbox = letterbox
         self._cancel = False
 
     def cancel(self) -> None:
@@ -45,9 +49,12 @@ class SubtitleWorker(QThread):
 
     def run(self) -> None:
         try:
+            face_note = "  \u00b7  face-aware layout" if self._face_aware and not self._letterbox else ""
             self.status.emit(
-                f"Loading faster-whisper ({self._model}) \u2014 {self._preset.label} preset"
+                f"Loading faster-whisper ({self._model}) \u2014 {self._preset.label} preset{face_note}"
             )
+            if self._face_aware and not self._letterbox:
+                self.status.emit("Sampling faces for caption placement\u2026")
             path = transcribe_to_file(
                 self._source,
                 self._out_dir,
@@ -55,6 +62,8 @@ class SubtitleWorker(QThread):
                 height_px=self._height,
                 model_name=self._model,
                 language=self._language,
+                face_aware=self._face_aware,
+                letterbox=self._letterbox,
                 progress_cb=self.progress.emit,
                 cancel_cb=lambda: self._cancel,
             )

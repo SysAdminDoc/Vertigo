@@ -770,6 +770,7 @@ class MainWindow(QMainWindow):
         model: str,
         language: str | None,
         preset_id: str = "pop",
+        face_aware: bool = False,
     ) -> None:
         if not self._info or not self._current_entry:
             self._toast.show_toast("Load a clip first.", kind="warning")
@@ -780,10 +781,13 @@ class MainWindow(QMainWindow):
         from core.caption_styles import resolve as resolve_caption_preset
         preset = resolve_caption_preset(preset_id)
 
+        is_letterbox = self._mode is ReframeMode.BLUR_LETTERBOX
+
         out_dir = self._info.path.parent
         self._subs_panel.set_running(True)
+        face_note = "  \u00b7  face-aware" if face_aware and not is_letterbox else ""
         self._subs_panel.set_status(
-            f"Transcribing {self._info.path.name} with whisper-{model} \u2014 {preset.label} style"
+            f"Transcribing {self._info.path.name} with whisper-{model} \u2014 {preset.label} style{face_note}"
         )
         if not subtitles_installed():
             self._subs_panel.set_status("Installing faster-whisper (one-time, ~200 MB)\u2026")
@@ -796,6 +800,8 @@ class MainWindow(QMainWindow):
             height_px=self._preset.height,
             model_name=model,
             language=language,
+            face_aware=face_aware,
+            letterbox=is_letterbox,
         )
         self._subtitle_worker.progress.connect(self._subs_panel.set_progress)
         self._subtitle_worker.status.connect(self._subs_panel.set_status)

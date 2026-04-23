@@ -17,7 +17,9 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .caption_layout import ALIGN_BOTTOM_CENTER, ALIGN_TOP_CENTER, plan_alignments
 from .caption_styles import CaptionPreset, default_preset, style_for_height
+from .face_samples import FaceSample, sample_faces
 
 
 DEFAULT_MODEL = "small"
@@ -140,6 +142,8 @@ def write_ass(
     height_px: int,
     *,
     width_px: int | None = None,
+    face_samples: list[FaceSample] | None = None,
+    letterbox: bool = False,
 ) -> Path:
     """Write a styled ASS file.
 
@@ -147,6 +151,12 @@ def write_ass(
     each Dialogue line carries inline ``\\kf<cs>`` sweep tags so libass
     fills words in sync with speech. Falls back to plain dialogue when
     no word-level timings are present.
+
+    If ``face_samples`` is provided, per-chunk alignment is decided by
+    ``caption_layout.plan_alignments``: chunks whose time-range overlaps
+    a face in the bottom caption zone are flipped to top-center via an
+    inline ``{\\an8}`` override. Letterbox reframe is exempt (see the
+    caption_layout docstring).
     """
     play_res_x = width_px if width_px else int(round(height_px * 9 / 16))
     play_res_y = height_px
@@ -154,15 +164,33 @@ def write_ass(
     style = style_for_height(preset, height_px)
     header = _ass_header(style, play_res_x, play_res_y)
 
-    dialogues: list[str] = []
+    # Build chunks first so we can plan alignments over the exact time ranges.
+    chunks: list[tuple[float, float, str, tuple[Word, ...]]] = []
     for cap in captions:
         if not cap.text:
             continue
-        chunks = _chunk_words(cap, preset) if preset.animation == "karaoke" and cap.words \
+        cap_chunks = _chunk_words(cap, preset) if preset.animation == "karaoke" and cap.words \
             else [(cap.start, cap.end, cap.text, cap.words)]
-        for (start, end, text, words) in chunks:
-            body = _format_body(text, words, preset)
-            dialogues.append(_ass_dialogue(start, end, body))
+        chunks.extend(cap_chunks)
+
+    alignments: list[int]
+    if face_samples:
+        alignments = plan_alignments(
+            preset,
+            [(s, e) for (s, e, _t, _w) in chunks],
+            face_samples,
+            letterbox=letterbox,
+        )
+    else:
+        alignments = [preset.alignment or ALIGN_BOTTOM_CENTER] * len(chunks)
+
+    default_align = preset.alignment or ALIGN_BOTTOM_CENTER
+    dialogues: list[str] = []
+    for (start, end, text, words), align in zip(chunks, alignments):
+        body = _format_body(text, words, preset)
+        if align != default_align:
+            body = f"{{\\an{align}}}{body}"
+        dialogues.append(_ass_dialogue(start, end, body))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(header + "\n".join(dialogues) + "\n", encoding="utf-8")
@@ -177,15 +205,34 @@ def transcribe_to_file(
     height_px: int = 1920,
     model_name: str = DEFAULT_MODEL,
     language: str | None = None,
+    face_aware: bool = False,
+    letterbox: bool = False,
+    face_sample_fps: float = 2.0,
     progress_cb=None,
     cancel_cb=None,
 ) -> Path:
     """Transcribe `source`, writing the format the preset requires.
 
     Returns the path to the generated subtitle file (.srt or .ass).
+
+    When ``face_aware`` is True, faces are sampled from the source at
+    ``face_sample_fps`` (default 2 Hz) before transcription and the ASS
+    writer emits per-chunk alignment overrides so captions never occlude
+    a face. Forces ASS output even for non-karaoke presets, since SRT
+    has no per-line positioning syntax. ``letterbox=True`` short-circuits
+    the face check (captions over blurred bars are always safe).
     """
     preset = preset or default_preset()
     want_words = preset.animation == "karaoke"
+
+    face_samples: list[FaceSample] | None = None
+    if face_aware and not letterbox:
+        face_samples = sample_faces(
+            source,
+            sample_fps=face_sample_fps,
+            cancel_cb=cancel_cb,
+        )
+
     captions = transcribe(
         source,
         model_name=model_name,
@@ -197,9 +244,18 @@ def transcribe_to_file(
 
     stem = source.stem
     out_dir.mkdir(parents=True, exist_ok=True)
-    if preset.animation == "karaoke" and any(c.words for c in captions):
-        return write_ass(captions, out_dir / f"{stem}.vertigo.ass", preset, height_px)
-    # Non-karaoke presets use SRT; libass will still apply force_style.
+
+    want_ass = (preset.animation == "karaoke" and any(c.words for c in captions)) or face_aware
+    if want_ass:
+        return write_ass(
+            captions,
+            out_dir / f"{stem}.vertigo.ass",
+            preset,
+            height_px,
+            face_samples=face_samples,
+            letterbox=letterbox,
+        )
+    # Non-karaoke presets without face-aware use SRT; libass will still apply force_style.
     return write_srt(captions, out_dir / f"{stem}.vertigo.srt")
 
 

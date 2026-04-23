@@ -50,12 +50,13 @@ class SubtitleChoice:
     model: str
     language: str | None
     preset_id: str = "pop"
+    face_aware: bool = False
 
 
 class SubtitlesPanel(QWidget):
-    transcribe_requested = pyqtSignal(str, object, str)  # model, lang, preset_id
+    transcribe_requested = pyqtSignal(str, object, str, bool)  # model, lang, preset_id, face_aware
     clear_requested = pyqtSignal()
-    changed = pyqtSignal(object)                          # SubtitleChoice
+    changed = pyqtSignal(object)                                # SubtitleChoice
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -119,6 +120,16 @@ class SubtitlesPanel(QWidget):
         self._refresh_preset_hint()
 
         root.addLayout(grid)
+
+        self._face_aware = QCheckBox("Lift captions off faces (face-aware placement)")
+        self._face_aware.setAccessibleName("Toggle face-aware caption positioning")
+        self._face_aware.setToolTip(
+            "Sample faces at 2 fps and flip captions to the top of the frame when "
+            "the default bottom position would cover a subject. No effect on Blur "
+            "Letterbox mode (captions sit over the blurred bar)."
+        )
+        self._face_aware.toggled.connect(lambda _: self.changed.emit(self._choice()))
+        root.addWidget(self._face_aware)
 
         self._status = QLabel(
             "Captions are transcribed locally with faster-whisper. "
@@ -201,6 +212,7 @@ class SubtitlesPanel(QWidget):
             model=self._model.currentData(),
             language=self._language.currentData(),
             preset_id=self._preset_combo.currentData() or "pop",
+            face_aware=self._face_aware.isChecked(),
         )
 
     def _emit_transcribe(self) -> None:
@@ -208,6 +220,7 @@ class SubtitlesPanel(QWidget):
             self._model.currentData(),
             self._language.currentData(),
             self._preset_combo.currentData() or "pop",
+            self._face_aware.isChecked(),
         )
 
     def _on_clear(self) -> None:
@@ -235,6 +248,7 @@ class SubtitlesPanel(QWidget):
     def _reset(self, *, keep_toggle: bool = False) -> None:
         if not keep_toggle:
             self._toggle.setChecked(False)
+            self._face_aware.setChecked(False)
         self._srt_path = None
         self._clear_btn.setEnabled(False)
         self._progress.hide()

@@ -97,10 +97,14 @@ never the latter.
 
 ## Tier 4 · Power-user opt-in [gated behind toggles]
 
-- [ ] **T4a · Face-aware caption positioning** · ~4 h · MediaPipe (already pulled)
-  Sample 2 fps, emit `\pos(x, y)` overrides on Dialogue lines so
-  captions never overlap the face. Falls back to safe-area default.
-  Depends on T2a face-tracker plumbing.
+- [x] **T4a · Face-aware caption positioning** · ~4 h · v0.10.0 · MediaPipe (already pulled)
+  Sample 2 fps, emit `{\an8}` top-center override on Dialogue lines when
+  a detected face would be occluded by the default bottom-center caption
+  zone. Falls back to safe-area default when no face overlap is found.
+  Blur Letterbox mode is exempt (captions land on the blurred bar, no
+  subject to occlude). Forces ASS output for non-karaoke presets since
+  SRT can't carry per-line positioning. Opt-in toggle on the Captions
+  tab.
 
 - [ ] **T4b · Pyannote speaker diarization** · ~4–6 h · WhisperX (BSD-2) + pyannote (MIT)
   One ASS style per speaker with a distinct `PrimaryColour`. Gated

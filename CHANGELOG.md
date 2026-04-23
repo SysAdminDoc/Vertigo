@@ -2,6 +2,29 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.10.0] - 2026-04-23
+
+### Tier 4a · Face-aware caption positioning
+
+**T4a · Face-aware caption positioning (`v0.10.0`).** New opt-in toggle on the Captions tab — "Lift captions off faces (face-aware placement)". When enabled, faces are sampled at 2 fps before transcription and the ASS writer emits per-chunk alignment overrides so captions never sit on top of a subject. The v0.8.0 face-tracker plumbing is reused: MediaPipe is preferred, Haar cascade is the fallback.
+
+- `core/face_samples.py` — minimal face sampler (~130 LoC) that returns normalised bounding boxes per time-step. Decoupled from `core/detect.py::FaceTracker` so the caption pass can run without affecting Smart Track state.
+- `core/caption_layout.py` — layout heuristic. Computes the caption zone in normalised y-coordinates from the preset's `margin_v_fraction` plus a conservative 12 % two-line caption height estimate, checks each chunk's time window against overlapping face samples, and returns ASS alignment codes (2 = bottom-center default, 8 = top-center when a face occludes). `min_face_area=0.015` gate filters spurious tiny detections.
+- `core/subtitles.py::write_ass` — accepts optional `face_samples` + `letterbox` kwargs, runs `plan_alignments` before emitting Dialogue lines, and prefixes overridden chunks with `{\anN}` inline tag.
+- `core/subtitles.py::transcribe_to_file` — new `face_aware`/`letterbox`/`face_sample_fps` params. When `face_aware=True`, samples faces before transcribing. Forces ASS output for non-karaoke presets (SRT can't carry per-line positioning).
+- `workers/subtitle_worker.py` — two new kwargs (`face_aware`, `letterbox`) piped through to `transcribe_to_file`; status line shows "face-aware layout" when active.
+- `ui/subtitles_panel.py` — new `QCheckBox` "Lift captions off faces", tooltip explains the 2 fps sample rate + letterbox exemption. `SubtitleChoice` carries the flag; `transcribe_requested` signal gained a fourth `bool` argument.
+- `ui/main_window.py::_run_transcribe` — accepts the `face_aware` flag, passes `is_letterbox = self._mode is ReframeMode.BLUR_LETTERBOX` so letterbox mode short-circuits the face pass entirely.
+
+**Blur Letterbox exemption.** In letterbox reframe the bottom of the output is the blurred bar, not the subject. The face pass is skipped there (both computationally and in the alignment decision) — captions stay at bottom-center regardless of where the subject is in the source.
+
+**Why top-center instead of `\pos` coordinates?** The research-report suggestion was `\pos(x, y)` overrides per-word. Top-center (`{\an8}`) is equivalent for every realistic placement (two safe zones: top or bottom, never middle-of-frame), simpler to reason about, and keeps the `margin_v` tuning intact — the caption just mirrors vertically. No new layout math needed.
+
+### Verified
+- `chunk_alignment` unit cases pass: face in bottom zone → flips to 8; face in top → stays 2; tiny face (area < 0.015) → ignored; out-of-window sample → ignored; letterbox flag → always default.
+- End-to-end `write_ass` with synthetic samples emits `{\an8}Hello there` on the chunk overlapping a face and plain `Nothing here` on the chunk that doesn't.
+- `MainWindow` constructs cleanly (offscreen).
+
 ## [0.9.0] - 2026-04-23
 
 ### Tier 3 (partial) · Shot-boundary UX + hook-energy signal
