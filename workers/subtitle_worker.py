@@ -1,4 +1,9 @@
-"""QThread that runs faster-whisper off the UI thread."""
+"""QThread that runs faster-whisper off the UI thread.
+
+Output format is selected by the active caption preset: karaoke presets
+with per-word animation write an ASS file; all other presets write SRT.
+libass is happy with either, so the FFmpeg burn-in path is identical.
+"""
 
 from __future__ import annotations
 
@@ -6,26 +11,31 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from core.subtitles import DEFAULT_MODEL, transcribe_to_srt
+from core.caption_styles import CaptionPreset, default_preset
+from core.subtitles import DEFAULT_MODEL, transcribe_to_file
 
 
 class SubtitleWorker(QThread):
     progress = pyqtSignal(float)           # 0..1
     status = pyqtSignal(str)               # log line
-    finished_ok = pyqtSignal(str)          # SRT path
+    finished_ok = pyqtSignal(str)          # final subtitle file path
     failed = pyqtSignal(str)
 
     def __init__(
         self,
         source: Path,
-        out_path: Path,
+        out_dir: Path,
         *,
+        preset: CaptionPreset | None = None,
+        height_px: int = 1920,
         model_name: str = DEFAULT_MODEL,
         language: str | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source)
-        self._out_path = Path(out_path)
+        self._out_dir = Path(out_dir)
+        self._preset = preset or default_preset()
+        self._height = height_px
         self._model = model_name
         self._language = language
         self._cancel = False
@@ -35,10 +45,14 @@ class SubtitleWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.status.emit(f"Loading faster-whisper ({self._model})...")
-            path = transcribe_to_srt(
+            self.status.emit(
+                f"Loading faster-whisper ({self._model}) \u2014 {self._preset.label} preset"
+            )
+            path = transcribe_to_file(
                 self._source,
-                self._out_path,
+                self._out_dir,
+                preset=self._preset,
+                height_px=self._height,
                 model_name=self._model,
                 language=self._language,
                 progress_cb=self.progress.emit,

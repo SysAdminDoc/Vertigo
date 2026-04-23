@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.caption_styles import PRESETS as CAPTION_PRESETS, default_preset as default_caption_preset
 from core.subtitles import AVAILABLE_MODELS, DEFAULT_MODEL
 
 
@@ -48,12 +49,13 @@ class SubtitleChoice:
     srt_path: Path | None
     model: str
     language: str | None
+    preset_id: str = "pop"
 
 
 class SubtitlesPanel(QWidget):
-    transcribe_requested = pyqtSignal(str, object)   # model, language-code-or-None
+    transcribe_requested = pyqtSignal(str, object, str)  # model, lang, preset_id
     clear_requested = pyqtSignal()
-    changed = pyqtSignal(object)                     # SubtitleChoice
+    changed = pyqtSignal(object)                          # SubtitleChoice
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -95,6 +97,26 @@ class SubtitlesPanel(QWidget):
             self._language.addItem(name, code)
         grid.addWidget(lang_lbl, 1, 0)
         grid.addWidget(self._language, 1, 1)
+
+        style_lbl = QLabel("Style")
+        style_lbl.setObjectName("formLabel")
+        self._preset_combo = QComboBox()
+        self._preset_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._preset_combo.setToolTip("Preset look for burned-in captions")
+        for preset in CAPTION_PRESETS.values():
+            self._preset_combo.addItem(preset.label, preset.id)
+        default_preset_idx = self._preset_combo.findData(default_caption_preset().id)
+        if default_preset_idx >= 0:
+            self._preset_combo.setCurrentIndex(default_preset_idx)
+        self._preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        grid.addWidget(style_lbl, 2, 0)
+        grid.addWidget(self._preset_combo, 2, 1)
+
+        self._preset_hint = QLabel("")
+        self._preset_hint.setObjectName("valueMuted")
+        self._preset_hint.setWordWrap(True)
+        grid.addWidget(self._preset_hint, 3, 0, 1, 2)
+        self._refresh_preset_hint()
 
         root.addLayout(grid)
 
@@ -178,14 +200,37 @@ class SubtitlesPanel(QWidget):
             srt_path=self._srt_path,
             model=self._model.currentData(),
             language=self._language.currentData(),
+            preset_id=self._preset_combo.currentData() or "pop",
         )
 
     def _emit_transcribe(self) -> None:
-        self.transcribe_requested.emit(self._model.currentData(), self._language.currentData())
+        self.transcribe_requested.emit(
+            self._model.currentData(),
+            self._language.currentData(),
+            self._preset_combo.currentData() or "pop",
+        )
 
     def _on_clear(self) -> None:
         self.set_srt_path(None)
         self.clear_requested.emit()
+
+    def _on_preset_changed(self, *_args) -> None:
+        self._refresh_preset_hint()
+        self.changed.emit(self._choice())
+
+    def _refresh_preset_hint(self) -> None:
+        preset_id = self._preset_combo.currentData() or "pop"
+        preset = CAPTION_PRESETS.get(preset_id)
+        if preset is None:
+            self._preset_hint.setText("")
+            return
+        if preset.animation == "karaoke":
+            extra = "  \u00b7  word-level timings (slower)"
+        elif preset.animation == "pop":
+            extra = "  \u00b7  per-chunk emphasis"
+        else:
+            extra = ""
+        self._preset_hint.setText(f"{preset.description}{extra}")
 
     def _reset(self, *, keep_toggle: bool = False) -> None:
         if not keep_toggle:

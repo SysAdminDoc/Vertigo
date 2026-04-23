@@ -2,6 +2,34 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.8.0] - 2026-04-23
+
+### Captions leap (Tier 1 from the competitive-research roadmap)
+- **Caption preset system** (`core/caption_styles.py`) — `CaptionPreset` dataclass + six bundled looks (Clean, Pop, Karaoke, Bold Yellow, Neon Outline, Classic). Replaces the single hard-coded ASS block. Style picker surfaced as a dropdown in the Captions tab with a per-preset hint line.
+- **Mobile-correct defaults** — font size now scales as `height / preset.font_scale` (20–24 range, ~87 pt at 1080 p instead of fixed 24 pt), bottom margin is `0.20 × height` not a hard-coded 60 px, wrap targets ≤ 18 chars × 2 lines. 2026 creator-tool consensus (CapCut / Opus / Submagic / Descript).
+- **Word-level karaoke captions** — `faster-whisper` now called with `word_timestamps=True` for karaoke presets (zero new deps). New writer emits ASS with inline `\kf<cs>` fill-sweep tags per word. libass renders through the existing `subtitles=` filter. Soft limits: 3–4 words/chunk, ≤ 1.2 s/chunk. ASS writer patterned after `jianfch/stable-ts` `text_output.py` (MIT; re-implemented).
+- `core/subtitles.py` refactored: new `Word` / `Caption` dataclasses, `transcribe_to_file(source, out_dir, preset, height_px, ...)` dispatches to SRT or styled ASS based on preset. Legacy `transcribe_to_srt(source, out_path)` kept as a thin alias.
+- `EncodeJob` carries a `caption_preset_id`; `_subtitles_filter` builds `force_style=` from `force_style_string(preset, height)` so the same preset lands correctly at any output resolution.
+
+### Smart-track quality (Tier 2)
+- **`SmoothedCameraman` + `SpeakerTracker`** (`core/cameraman.py`) — ~320 LoC, MIT-compatible re-implementation of `mutonby/openshorts`'s tracking algorithms. Safe-zone hysteresis (no viewport motion while subject stays within ±25 % of crop width), speed-adaptive motion (3 px/f resting, 15 px/f on > 50 %-of-crop jumps, overshoot clamp), ID-sticky speaker tracking with exponential activity decay (0.85/f), +3 bonus on the active speaker, and a 30-frame switch cool-down.
+- **Active-speaker bonus now gated on presence-this-frame** — bug caught during smoke-test: the previous port would keep an off-screen speaker indefinitely because the sticky bonus applied even when they weren't observed. Active bonus now only applies when the track was actually matched to an observation on the current frame, and switch candidates are restricted to tracks seen this frame.
+- **Savitzky-Golay smoothing** on the x(t) trajectory (`core/reframe.py::_smooth_track`) — `scipy.signal.savgol_filter(window_length = odd(src_fps · 0.5), polyorder = 3)` applied before the piecewise-lerp FFmpeg expression is built. Kills detection jitter without perceptual latency. `scipy>=1.11` added to requirements.
+- **VFR → CFR preflight** (`core/preflight.py`) — `VideoInfo` now carries `r_fps`, `avg_fps`, and `video_start_time`; `is_variable_frame_rate` detects > 1 % delta between r and avg frame rates; `plan_preflight(info, target_fps)` emits pre-input and output-side FFmpeg args. VFR sources now normalise to the closest safe-ladder rate (24 / 25 / 30 / 50 / 60) via `-vsync cfr -r <n>`. Non-zero video `start_time` now adds `-af adelay=<ms>|<ms>,apad` so audio realigns to t = 0 instead of silently drifting. Autocrop-vertical has no LICENSE, so this is a clean re-implementation of the public `ffprobe` technique.
+- **Cameraman-driven detection pipeline** — `FaceTracker.track_with_cameraman(video, crop_width_frac)` feeds all per-frame detections through `SpeakerTracker` + `SmoothedCameraman`. `DetectWorker` picks this path automatically when the main window knows the clip's crop geometry. `_smart_track_crop_width_frac()` computes that fraction from the active preset + probed aspect.
+- **Dry-run plan reporter** (`core/dryrun.py`, T2d) — builds a full synthesis of the active pipeline (probe → preflight → scene detection → reframe plan → encoder → per-scene strategy) and renders it to a monospace report. Surfaced as a new **"Show plan (dry run)"** button in the Track tab; output lands in the existing export log panel. No FFmpeg is invoked.
+
+### Added
+- `ui/tokens.py`-adjacent `core/preflight.py` and `core/cameraman.py` keep FFmpeg and Qt out of the hot-path logic so it stays testable.
+- `ROADMAP.md` — tiered plan grounded in the 2026 competitive research pass (three parallel agents: reframing tools / captions / auto-highlight). Ticks T1a/T1b/T1c + T2a/T2b/T2c/T2d.
+
+### Verified
+- End-to-end encode with Smart Track + savgol smoothing + synthetic 40-point trajectory → clean MP4 (rc = 0).
+- SpeakerTracker switches correctly on a simulated "subject teleports across frame" scenario — camera reverses direction within one frame (654 → 669), accelerates at 15 px/f (819 → 1044), decelerates into dead-zone hold (1104 → 1104 on return-to-centre below threshold).
+- Caption preset style resolves correctly: `pop` at 1920 p height → font 96 pt, margin 384 px.
+- Preflight no-ops cleanly on a CFR 30 fps test clip.
+- All six sidebar tabs construct under every theme.
+
 ## [0.7.0] - 2026-04-23
 
 ### Premium polish pass

@@ -174,6 +174,11 @@ def _plan_track(
     FFmpeg's crop filter accepts an expression for `x`. We build an
     `if(between(t,a,b), x, ...)` chain interpolating between samples.
     If no points provided, falls back to center crop.
+
+    Before building the expression we apply a Savitzky-Golay low-pass
+    filter to the x(t) series — kills micro-jitter from per-frame
+    detection noise without introducing perceivable latency. Idea
+    borrowed from bmezaris/RetargetVid (ICIP 2021).
     """
     cw, ch = _crop_dims(info, tw, th)
     if not track_points:
@@ -181,6 +186,7 @@ def _plan_track(
 
     max_x = max(0, info.width - cw)
     pts = sorted(track_points, key=lambda p: p.t)
+    pts = _smooth_track(pts, source_fps=info.fps)
     expr = _x_expression(pts, cw, info.width, max_x)
     vf = (
         f"crop={cw}:{ch}:'{expr}':(ih-{ch})/2,"
@@ -188,8 +194,43 @@ def _plan_track(
     )
     return ReframePlan(
         video_filter=vf,
-        notes=f"Smart-track ({len(pts)} keyframes)",
+        notes=f"Smart-track ({len(pts)} keyframes, smoothed)",
     )
+
+
+def _smooth_track(points: list, source_fps: float) -> list:
+    """Apply a Savitzky-Golay low-pass over the x-coordinate series.
+
+    Falls back to the raw points if scipy is unavailable or if the
+    sample count is too small for the chosen window.
+    """
+    if len(points) < 5:
+        return points
+    try:
+        from scipy.signal import savgol_filter
+        import numpy as np
+    except ImportError:
+        return points
+
+    xs = np.array([p.x for p in points], dtype=float)
+
+    # Window length tracks ~0.5 s at the source frame rate, clamped to
+    # an odd value in [5, len(points) | odd-1]. Polyorder < window.
+    target = max(5, int(round((source_fps or 30.0) * 0.5)))
+    window = min(target, len(points) - (1 if len(points) % 2 == 0 else 0))
+    if window % 2 == 0:
+        window -= 1
+    if window < 5:
+        return points
+
+    smoothed = savgol_filter(xs, window_length=window, polyorder=3, mode="nearest")
+    smoothed = np.clip(smoothed, 0.0, 1.0)
+
+    from .detect import TrackPoint
+    return [
+        TrackPoint(t=p.t, x=float(sx), confidence=p.confidence)
+        for p, sx in zip(points, smoothed)
+    ]
 
 
 def _scene_clamp(pts: list, scenes: list[tuple[float, float]]) -> list:

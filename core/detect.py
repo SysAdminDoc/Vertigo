@@ -1,4 +1,16 @@
-"""Face/subject detection — lazy MediaPipe, sampled across timeline."""
+"""Face/subject detection — lazy MediaPipe, sampled across timeline.
+
+Two call paths are supported:
+
+    * `track(video_path)` — legacy single-largest-face per frame with
+      light exponential smoothing. Kept for zero-dep fallback when
+      the crop geometry isn't known yet (e.g. precomputing tracks).
+
+    * `track_with_cameraman(video_path, crop_width_frac)` — feeds all
+      detected faces per frame through a `SpeakerTracker` +
+      `SmoothedCameraman` pipeline (see `core.cameraman`) for stable,
+      speaker-sticky, hysteresis-gated viewport motion.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +19,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+
+from .cameraman import FaceObservation, SmoothedCameraman, SpeakerTracker
 
 
 @dataclass(frozen=True)
@@ -82,6 +96,101 @@ class FaceTracker:
             cap.release()
 
         return points
+
+    # ------------------------------------------------------------------
+    # Cameraman-driven smart track.
+    #
+    # `crop_width_frac` is the 9:16 viewport's width as a fraction of the
+    # source width. The cameraman tuning (dead-zone, big-jump threshold,
+    # per-frame speeds) needs this to scale correctly per clip geometry.
+    # ------------------------------------------------------------------
+    def track_with_cameraman(
+        self,
+        video_path: str | Path,
+        crop_width_frac: float,
+        progress_cb=None,
+        cancel_cb=None,
+    ) -> list[TrackPoint]:
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            return []
+
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        duration = total_frames / src_fps if src_fps else 0.0
+        step_frames = max(1, int(round(src_fps / self.sample_fps)))
+
+        frame_idx = 0
+        points: list[TrackPoint] = []
+
+        # Grab first frame to learn source geometry and initialise the
+        # cameraman + speaker tracker.
+        src_w: int | None = None
+        cameraman: SmoothedCameraman | None = None
+        speakers = SpeakerTracker()
+
+        try:
+            while True:
+                if cancel_cb and cancel_cb():
+                    break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    break
+
+                h, w = frame.shape[:2]
+                if src_w is None:
+                    src_w = w
+                    crop_w_px = max(1.0, float(crop_width_frac) * w)
+                    cameraman = SmoothedCameraman(
+                        crop_width_px=crop_w_px,
+                        source_width_px=float(w),
+                    )
+
+                observations = [
+                    FaceObservation(
+                        frame=frame_idx,
+                        t=frame_idx / src_fps if src_fps else 0.0,
+                        cx=bx + bw / 2,
+                        cy=by + bh / 2,
+                        w=bw,
+                        h=bh,
+                        score=conf,
+                    )
+                    for (bx, by, bw, bh, conf) in self._detect_boxes(frame, w, h)
+                ]
+
+                active = speakers.step(frame_idx, observations)
+                target_cx = active.cx if active else (cameraman.center_x if cameraman else w / 2.0)
+                new_cx = cameraman.step(target_cx) if cameraman else target_cx
+
+                t = frame_idx / src_fps if src_fps else 0.0
+                confidence = active.total_score if active else 0.1
+                points.append(
+                    TrackPoint(
+                        t=t,
+                        x=float(new_cx / max(1, w)),
+                        confidence=float(min(1.0, confidence / 4.0)),
+                    )
+                )
+
+                if progress_cb and duration:
+                    progress_cb(min(1.0, t / duration))
+
+                frame_idx += step_frames
+                if total_frames and frame_idx >= total_frames:
+                    break
+        finally:
+            cap.release()
+
+        return points
+
+    # ------------------------------------------------------------------
+    def _detect_boxes(self, frame: np.ndarray, w: int, h: int):
+        boxes = self._mediapipe_boxes(frame, w, h)
+        if not boxes:
+            boxes = self._haar_boxes(frame, w, h)
+        return boxes
 
     def _detect_center(self, frame: np.ndarray, w: int, h: int) -> tuple[float | None, float]:
         """Return (normalized_x_center, confidence) of the dominant subject, or (None, 0)."""

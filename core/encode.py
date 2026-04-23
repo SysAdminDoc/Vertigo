@@ -17,7 +17,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .caption_styles import CaptionPreset, force_style_string, resolve as resolve_caption_preset
 from .encoders import Encoder, encoder_args, pick_default
+from .preflight import Preflight, plan_preflight
 from .presets import Preset
 from .probe import VideoInfo
 from .reframe import ReframePlan
@@ -46,15 +48,19 @@ class EncodeJob:
     encoder: Encoder | None = None    # None = auto-pick best available
     quality: int = 75                 # 1..100 quality slider
     speed_preset: str | None = None   # encoder preset ("medium","p5",...)
-    subtitles_path: Path | None = None   # burn this SRT into the video
+    subtitles_path: Path | None = None   # burn this SRT/ASS into the video
     burn_subtitles: bool = False
+    caption_preset_id: str | None = None  # resolved via caption_styles.resolve()
 
     def build_command(self) -> list[str]:
         cmd = [ffmpeg_bin(), "-y", "-hide_banner", "-stats", "-progress", "pipe:2"]
 
+        preflight = plan_preflight(self.info, self.preset.fps)
+
         if self.trim_start > 0:
             cmd += ["-ss", f"{self.trim_start:.3f}"]
 
+        cmd += list(preflight.input_args)
         cmd += ["-i", str(self.info.path)]
 
         if self.trim_end is not None:
@@ -63,7 +69,11 @@ class EncodeJob:
 
         vf = self.plan.video_filter
         if self.burn_subtitles and self.subtitles_path and self.subtitles_path.exists():
-            vf = vf + "," + _subtitles_filter(self.subtitles_path)
+            vf = vf + "," + _subtitles_filter(
+                self.subtitles_path,
+                resolve_caption_preset(self.caption_preset_id),
+                self.preset.height,
+            )
 
         cmd += ["-vf", vf]
 
@@ -87,6 +97,8 @@ class EncodeJob:
             cmd += ["-c:a", "aac", "-b:a", self.preset.audio_bitrate, "-ar", "48000"]
         else:
             cmd += ["-an"]
+
+        cmd += list(preflight.output_args)
 
         cmd += [str(self.out_path)]
         return cmd
@@ -152,21 +164,20 @@ def _double_bitrate(rate: str) -> str:
     return rate
 
 
-def _subtitles_filter(srt_path: Path) -> str:
-    """Build an FFmpeg `subtitles=` filter expression for burn-in.
+def _subtitles_filter(srt_path: Path, preset: CaptionPreset, out_height: int) -> str:
+    """Build an FFmpeg `subtitles=` filter for burn-in.
 
     FFmpeg is fussy about path escaping on Windows — single-quote the path,
     convert backslashes to forward slashes, escape the drive colon with \\:.
+
+    The `force_style=` block is generated from a resolution-relative
+    `CaptionPreset` so the same preset renders correctly on 1080p,
+    720p, 4K, etc.
     """
     s = str(srt_path.resolve()).replace("\\", "/")
     if len(s) > 1 and s[1] == ":":
         s = s[0] + r"\:" + s[2:]
-    style = (
-        "FontName=Segoe UI,FontSize=24,Bold=1,"
-        "PrimaryColour=&H00FFFFFF,OutlineColour=&H99000000,"
-        "BackColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,"
-        "MarginV=60,Alignment=2"
-    )
+    style = force_style_string(preset, out_height)
     return f"subtitles='{s}':force_style='{style}'"
 
 

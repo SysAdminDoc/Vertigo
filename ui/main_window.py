@@ -364,6 +364,16 @@ class MainWindow(QMainWindow):
         self._detect_btn.setEnabled(False)
         self._detect_btn.clicked.connect(self._run_detect)
         lay.addWidget(self._detect_btn)
+
+        self._dryrun_btn = QPushButton("Show plan (dry run)")
+        self._dryrun_btn.setObjectName("ghostBtn")
+        self._dryrun_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dryrun_btn.setToolTip(
+            "Print the per-scene reframe plan without encoding. No file is written."
+        )
+        self._dryrun_btn.setEnabled(False)
+        self._dryrun_btn.clicked.connect(self._run_dry)
+        lay.addWidget(self._dryrun_btn)
         lay.addStretch(1)
         return host
 
@@ -584,6 +594,8 @@ class MainWindow(QMainWindow):
             "Finding subjects\u2026" if running else
             ("Run again" if self._track_points else "Find subjects")
         )
+        if hasattr(self, "_dryrun_btn"):
+            self._dryrun_btn.setEnabled(self._info is not None and not running)
 
     # --------------------------------------------- import
     def _import_one(self, path: str) -> None:
@@ -746,23 +758,37 @@ class MainWindow(QMainWindow):
                 pass
 
     # --------------------------------------------- transcription
-    def _run_transcribe(self, model: str, language: str | None) -> None:
+    def _run_transcribe(
+        self,
+        model: str,
+        language: str | None,
+        preset_id: str = "pop",
+    ) -> None:
         if not self._info or not self._current_entry:
             self._toast.show_toast("Load a clip first.", kind="warning")
             return
         if self._subtitle_worker and self._subtitle_worker.isRunning():
             return
-        out = self._info.path.with_suffix(".vertigo.srt")
+
+        from core.caption_styles import resolve as resolve_caption_preset
+        preset = resolve_caption_preset(preset_id)
+
+        out_dir = self._info.path.parent
         self._subs_panel.set_running(True)
         self._subs_panel.set_status(
-            f"Transcribing {self._info.path.name} with whisper-{model}..."
+            f"Transcribing {self._info.path.name} with whisper-{model} \u2014 {preset.label} style"
         )
         if not subtitles_installed():
-            self._subs_panel.set_status("Installing faster-whisper (one-time, ~200 MB)...")
+            self._subs_panel.set_status("Installing faster-whisper (one-time, ~200 MB)\u2026")
 
         entry_id = self._current_entry.id
         self._subtitle_worker = SubtitleWorker(
-            self._info.path, out, model_name=model, language=language
+            self._info.path,
+            out_dir,
+            preset=preset,
+            height_px=self._preset.height,
+            model_name=model,
+            language=language,
         )
         self._subtitle_worker.progress.connect(self._subs_panel.set_progress)
         self._subtitle_worker.status.connect(self._subs_panel.set_status)
@@ -810,7 +836,12 @@ class MainWindow(QMainWindow):
         else:
             self._scene_label.setText("Continuous take \u2014 no hard cuts detected")
 
-        self._detect_worker = DetectWorker(self._info.path, sample_fps=2.0, smoothing=0.65)
+        self._detect_worker = DetectWorker(
+            self._info.path,
+            sample_fps=2.0,
+            smoothing=0.65,
+            crop_width_frac=self._smart_track_crop_width_frac(),
+        )
         self._detect_worker.progress.connect(
             lambda v: self._detect_progress.setValue(int(v * 100))
         )
@@ -955,6 +986,7 @@ class MainWindow(QMainWindow):
             speed_preset=out_choice.speed_preset if out_choice else None,
             subtitles_path=srt_path,
             burn_subtitles=burn,
+            caption_preset_id=(sub_choice.preset_id if sub_choice else None),
         )
 
         if entry:
@@ -983,6 +1015,56 @@ class MainWindow(QMainWindow):
             lambda msg, eid=(entry.id if entry else None): self._on_export_fail(msg, eid)
         )
         self._encode_worker.start()
+
+    def _run_dry(self) -> None:
+        if not self._info:
+            self._toast.show_toast("Load a clip first.", kind="warning")
+            return
+        from core.dryrun import build_report
+
+        out_choice = self._output_choice
+        try:
+            report = build_report(
+                info=self._info,
+                preset=self._preset,
+                mode=self._mode,
+                track_points=self._track_points,
+                scenes=self._scenes,
+                adjustments=self._adjustments,
+                encoder=out_choice.encoder if out_choice else None,
+                quality=out_choice.quality if out_choice else 75,
+                speed_preset=out_choice.speed_preset if out_choice else None,
+                trim_start=self._trim_low or 0.0,
+                trim_end=self._trim_high if self._trim_high and self._trim_high < self._info.duration else None,
+                crop_width_frac=self._smart_track_crop_width_frac(),
+            )
+        except Exception as e:
+            self._toast.show_toast(f"Dry-run failed: {e}", kind="error")
+            return
+
+        self._log.show()
+        self._log.clear()
+        self._log.append("Dry run \u2014 no files will be written")
+        self._log.append("\u2500" * 58)
+        for line in report.as_text().splitlines():
+            self._log.append(line)
+        self._set_export_status("Plan ready")
+        self._toast.show_toast("Dry-run plan written to the export log.", kind="info")
+
+    def _smart_track_crop_width_frac(self, *, info: VideoInfo | None = None) -> float | None:
+        """Return the 9:16 viewport width as a fraction of source width,
+        so the cameraman's safe-zone / big-jump thresholds scale
+        correctly per clip. Returns None when geometry is unknown."""
+        src = info or self._info
+        if src is None or src.width <= 0 or src.height <= 0:
+            return None
+        target = self._preset.width / self._preset.height
+        source = src.width / src.height
+        if source >= target:
+            crop_w = src.height * target
+        else:
+            crop_w = src.width
+        return max(0.1, min(1.0, crop_w / src.width))
 
     def _default_output_path(self, info: VideoInfo) -> Path:
         stem = info.path.stem
@@ -1148,7 +1230,12 @@ class MainWindow(QMainWindow):
         except Exception:
             self._scenes = []
 
-        worker = DetectWorker(info.path, sample_fps=2.0, smoothing=0.65)
+        worker = DetectWorker(
+            info.path,
+            sample_fps=2.0,
+            smoothing=0.65,
+            crop_width_frac=self._smart_track_crop_width_frac(info=info),
+        )
         worker.progress.connect(lambda v: self._detect_progress.setValue(int(v * 100)))
         def _done(points):
             self._track_points = points
