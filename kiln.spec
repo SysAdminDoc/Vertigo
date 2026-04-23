@@ -77,7 +77,10 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    # The multiprocessing runtime hook runs BEFORE user code and guarantees
+    # multiprocessing.freeze_support() fires in every worker process —
+    # otherwise MediaPipe / cv2 children relaunch the GUI ("fork bomb").
+    runtime_hooks=[str(asset_dir / "runtime_hook_mp.py")],
     excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -118,8 +121,8 @@ if sys.platform == "darwin":
         icon=icon_file,
         bundle_identifier="com.sysadmindoc.kiln",
         info_plist={
-            "CFBundleShortVersionString": "0.5.0",
-            "CFBundleVersion": "0.5.0",
+            "CFBundleShortVersionString": "0.5.1",
+            "CFBundleVersion": "0.5.1",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },

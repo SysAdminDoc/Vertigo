@@ -2,6 +2,18 @@
 
 All notable changes to Kiln are documented here.
 
+## [0.5.1] - 2026-04-22
+
+### Fixed
+- **Critical — PyInstaller fork-bomb on Windows.** The v0.5.0 binary relaunched itself recursively on startup because `multiprocessing.freeze_support()` was not called at the entry point. MediaPipe and cv2 both use Python's `multiprocessing` module internally; on Windows each worker spawns via `sys.executable`, which in a frozen build is `Kiln.exe` — so every worker booted a new GUI instead of a worker, spawning new workers, and so on. Two guards now prevent this:
+  1. `multiprocessing.freeze_support()` is now the first executable statement in `kiln.py`.
+  2. A PyInstaller runtime hook (`assets/runtime_hook_mp.py`) fires the same call *before* user code, wired into `kiln.spec` via `runtime_hooks=[...]`.
+- **Bootstrap disabled in frozen builds.** `_bootstrap()` used to call `[sys.executable, "-m", "pip", "install", ...]` whenever a package import failed. In a frozen exe `sys.executable` is the GUI itself, so a missing bundled dep would have re-launched Kiln in a loop instead of running pip. `_bootstrap()` and `_pip_install()` now short-circuit when `sys.frozen` is set and print a clear "bundled import failed" error instead.
+- **Version bumped to 0.5.1** everywhere (`__version__`, README badge, macOS `CFBundleShortVersionString` / `CFBundleVersion`).
+
+### Rebuild required
+Anyone who downloaded the v0.5.0 binary should kill any running `Kiln.exe` processes (Task Manager or `taskkill /F /IM Kiln.exe /T`) and replace the binary with the v0.5.1 release once CI finishes.
+
 ## [0.5.0] - 2026-04-22
 
 ### Changed

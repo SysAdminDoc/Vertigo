@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kiln v0.5.0 — a premium kiln for short-form vertical video.
+"""Kiln v0.5.1 — a premium kiln for short-form vertical video.
 
 Takes raw footage of any shape and fires it into polished 9:16 for
 YouTube Shorts, TikTok, and Instagram Reels.
@@ -9,13 +9,25 @@ Turnkey entry: bootstraps dependencies on first run, then launches the GUI.
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------- CRITICAL
+# multiprocessing.freeze_support() MUST be the very first thing that runs in
+# the entry point of a frozen (PyInstaller) build on Windows. Without it,
+# any library that uses Python's multiprocessing module (mediapipe, cv2,
+# torch-ish backends) will call sys.executable to spawn a worker — and
+# sys.executable is Kiln.exe itself, causing the whole app to relaunch
+# recursively (the "PyInstaller fork bomb"). It is a no-op at first call
+# in the parent; it prevents re-execution of main() in each child.
+# ----------------------------------------------------------------
+import multiprocessing
+multiprocessing.freeze_support()
+
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 APP_NAME = "Kiln"
 
 _REQUIRED = [
@@ -28,10 +40,22 @@ _REQUIRED = [
 ]
 
 
+def _is_frozen() -> bool:
+    """True when running inside a PyInstaller bundle."""
+    return getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
+
+
 # ---------------------------------------------------------------- bootstrap
 
 def _pip_install(spec: str) -> bool:
-    """Try three install strategies. Return True on success."""
+    """Try three install strategies. Return True on success.
+
+    This must never run in a frozen build — sys.executable is the app
+    itself, which would recursively relaunch the GUI instead of pip.
+    """
+    if _is_frozen():
+        return False
+
     bases = [
         [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
         [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
@@ -48,7 +72,27 @@ def _pip_install(spec: str) -> bool:
 
 
 def _bootstrap() -> None:
-    """Import each required module; pip-install any that's missing."""
+    """Import each required module; pip-install any that's missing.
+
+    In a frozen build we never try to pip-install. If an import fails
+    there, the bundle is broken and we surface a clear error instead of
+    silently relaunching ourselves.
+    """
+    if _is_frozen():
+        missing = []
+        for mod, _spec in _REQUIRED:
+            try:
+                __import__(mod)
+            except ImportError:
+                missing.append(mod)
+        if missing:
+            sys.stderr.write(
+                f"[{APP_NAME}] bundled import failed: {', '.join(missing)}\n"
+                f"  This binary is incomplete. Please reinstall Kiln.\n"
+            )
+            sys.exit(4)
+        return
+
     missing: list[str] = []
     for mod, spec in _REQUIRED:
         try:
@@ -83,7 +127,9 @@ def main() -> int:
     _check_ffmpeg()
 
     # late imports so bootstrap can install them first
-    sys.path.insert(0, str(Path(__file__).parent))
+    if not _is_frozen():
+        sys.path.insert(0, str(Path(__file__).parent))
+
     from PyQt6.QtCore import Qt, QSettings
     from PyQt6.QtGui import QFont, QIcon
     from PyQt6.QtWidgets import QApplication
