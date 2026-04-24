@@ -60,6 +60,7 @@ from workers.subtitle_worker import SubtitleWorker
 from workers.auto_edit_worker import AutoEditWorker
 from workers.highlights_worker import HighlightsWorker
 from workers.pycaps_worker import PycapsWorker
+from workers.segment_proposals_worker import SegmentProposalsWorker
 from workers.vad_worker import VadWorker
 
 from .batch_queue import QueueEntry, QueueStatus
@@ -93,6 +94,7 @@ class MainController(QObject):
         self.highlights_worker: HighlightsWorker | None = None
         self.auto_edit_worker: AutoEditWorker | None = None
         self.pycaps_worker: PycapsWorker | None = None
+        self.segments_worker: SegmentProposalsWorker | None = None
         # Context captured when an export kicks off a pycaps pass, so
         # ``_on_pycaps_done`` can finish the export without the slot
         # needing to re-derive the original out path / entry id.
@@ -142,6 +144,7 @@ class MainController(QObject):
         w._player.trim_changed.connect(w._on_trim_changed)
         w._player.tighten_btn.clicked.connect(self.run_tighten_silences)
         w._player.highlights_btn.clicked.connect(self.run_find_highlights)
+        w._player.segments_btn.clicked.connect(self.run_suggest_segments)
         w._player.trim_silences_btn.clicked.connect(self.run_trim_silences)
         w._export_thumbs_btn.clicked.connect(self.export_thumbnails)
 
@@ -155,6 +158,7 @@ class MainController(QObject):
             self.highlights_worker,
             self.auto_edit_worker,
             self.pycaps_worker,
+            self.segments_worker,
         ):
             if w is not None and w.isRunning():
                 return True
@@ -184,6 +188,7 @@ class MainController(QObject):
             self.highlights_worker,
             self.auto_edit_worker,
             self.pycaps_worker,
+            self.segments_worker,
         ):
             if worker is None or not worker.isRunning():
                 continue
@@ -309,6 +314,8 @@ class MainController(QObject):
             w._subs_panel.set_srt_path(srt)
         w._toast.show_toast(f"Captions ready: {srt.name}", kind="success")
         w._refresh_overview()
+        # Captions for a long clip unlock Suggest segments.
+        self.refresh_segments_button()
 
     def _on_subs_fail(self, msg: str) -> None:
         w = self.win
@@ -497,6 +504,134 @@ class MainController(QObject):
         )
 
     def _apply_highlight_trim(self, start: float, end: float) -> None:
+        w = self.win
+        w._player.set_trim_range(start, end)
+        w._trim_low = start
+        w._trim_high = end
+        w._refresh_platform_notice()
+        w._refresh_overview()
+
+    # --------------------------------------------------------------- segment proposals (T3b)
+    def refresh_segments_button(self) -> None:
+        """Enable ``Suggest segments`` only when the loaded clip is long
+        enough (> 10 min) and a cached transcript exists for it.
+
+        We keep the gate permissive on duration (``should_propose_for_duration``
+        is the single source of truth) and strict on transcript — proposals
+        are strictly derived from the caption stream, so surfacing the
+        button without one would be a dead click.
+        """
+        from core.segment_proposals import should_propose_for_duration
+
+        w = self.win
+        btn = getattr(w._player, "segments_btn", None)
+        if btn is None:
+            return
+        info = w._info
+        entry = w._current_entry
+        has_long_clip = bool(info) and should_propose_for_duration(float(info.duration or 0.0))
+        cached = self.clip_captions.get(entry.id) if entry else None
+        has_captions = bool(cached) and any(getattr(c, "text", "").strip() for c in cached)
+        btn.setEnabled(has_long_clip and has_captions)
+        if has_long_clip and not has_captions:
+            btn.setToolTip(
+                "Generate AI captions in the Subtitles tab first \u2014 segment "
+                "proposals read from the cached transcript."
+            )
+        elif not has_long_clip and info:
+            btn.setToolTip(
+                "Segment proposals activate on clips longer than 10 minutes."
+            )
+        else:
+            btn.setToolTip(
+                "Split long clips (> 10 min) into candidate 30\u201390 s segments "
+                "using local TextTiling on the cached transcript. Pick a "
+                "segment to drop the trim on it."
+            )
+
+    def run_suggest_segments(self) -> None:
+        """Produce ranked 30-90 s segment candidates for the loaded clip
+        and pop a menu the user can pick from."""
+        from core.segment_proposals import should_propose_for_duration
+
+        w = self.win
+        if not w._info:
+            w._toast.show_toast("Load a clip first.", kind="warning")
+            return
+        if self.segments_worker and self.segments_worker.isRunning():
+            return
+        if not should_propose_for_duration(float(w._info.duration or 0.0)):
+            w._toast.show_toast(
+                "Segment proposals activate on clips longer than 10 minutes.",
+                kind="warning",
+            )
+            return
+        entry = w._current_entry
+        captions = self.clip_captions.get(entry.id) if entry else None
+        if not captions:
+            w._toast.show_toast(
+                "Generate AI captions first, then try Suggest segments.",
+                kind="warning",
+                duration_ms=5000,
+            )
+            return
+
+        w._toast.show_toast("Scanning transcript for segments\u2026", kind="info")
+        w._player.segments_btn.setEnabled(False)
+        worker = SegmentProposalsWorker(captions=list(captions))
+        worker.finished_ok.connect(self._on_segments_ready)
+        worker.failed.connect(self._on_segments_failed)
+        self.segments_worker = worker
+        worker.start()
+
+    def _on_segments_ready(self, proposals: list) -> None:
+        self.segments_worker = None
+        self.refresh_segments_button()
+        w = self.win
+        if not proposals:
+            w._toast.show_toast(
+                "No clear segment boundaries found in this transcript.",
+                kind="warning",
+            )
+            return
+        self._present_segments_menu(proposals)
+
+    def _on_segments_failed(self, msg: str) -> None:
+        self.segments_worker = None
+        self.refresh_segments_button()
+        if msg == "Cancelled.":
+            return
+        self.win._toast.show_toast(msg, kind="warning")
+
+    def _present_segments_menu(self, proposals: list) -> None:
+        """Popup menu of ranked segment proposals anchored to the button."""
+        w = self.win
+        menu = QMenu(w)
+        menu.setAccessibleName("Candidate segments")
+        for p in proposals:
+            label = self._format_segment_label(p)
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, s=float(p.start), e=float(p.end):
+                    self._apply_segment_trim(s, e)
+            )
+        btn = w._player.segments_btn
+        global_pos = btn.mapToGlobal(btn.rect().bottomLeft())
+        menu.exec(global_pos)
+
+    def _format_segment_label(self, p) -> str:
+        score_pct = int(round(max(0.0, min(1.0, float(p.score))) * 100))
+        hint = (p.title_hint or "").strip()
+        if len(hint) > 52:
+            hint = hint[:51].rstrip() + "\u2026"
+        reasons = ", ".join(p.reasons) if p.reasons else "length fit"
+        return (
+            f"{_fmt_duration(max(0.0, float(p.start)))} \u2013 "
+            f"{_fmt_duration(max(0.0, float(p.end)))}"
+            f"   \u00b7   {score_pct}%   \u00b7   {hint}   [{reasons}]"
+        )
+
+    def _apply_segment_trim(self, start: float, end: float) -> None:
         w = self.win
         w._player.set_trim_range(start, end)
         w._trim_low = start
@@ -1098,7 +1233,8 @@ class MainController(QObject):
         has_hl = bool(self.highlights_worker and self.highlights_worker.isRunning())
         has_ae = bool(self.auto_edit_worker and self.auto_edit_worker.isRunning())
         has_pc = bool(self.pycaps_worker and self.pycaps_worker.isRunning())
-        if not (has_encode or has_detect or has_subs or has_vad or has_hl or has_ae or has_pc):
+        has_seg = bool(self.segments_worker and self.segments_worker.isRunning())
+        if not (has_encode or has_detect or has_subs or has_vad or has_hl or has_ae or has_pc or has_seg):
             return
         self.batch_running = False
         w._cancel_btn.setEnabled(False)
@@ -1117,6 +1253,8 @@ class MainController(QObject):
             self.auto_edit_worker.cancel()
         if has_pc and self.pycaps_worker:
             self.pycaps_worker.cancel()
+        if has_seg and self.segments_worker:
+            self.segments_worker.cancel()
         w._refresh_overview()
 
     def _reset_export_ui(self) -> None:

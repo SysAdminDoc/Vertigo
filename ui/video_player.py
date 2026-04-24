@@ -293,6 +293,17 @@ class VideoPlayer(QWidget):
         self.highlights_btn.setAccessibleName("Find highlight moments")
         self.highlights_btn.setEnabled(False)
 
+        self.segments_btn = QPushButton("Suggest segments")
+        self.segments_btn.setObjectName("ghostBtn")
+        self.segments_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.segments_btn.setToolTip(
+            "Split long clips (> 10 min) into candidate 30\u201390 s segments "
+            "using local TextTiling on the cached transcript. Generate "
+            "captions first, then pick a segment to drop the trim on it."
+        )
+        self.segments_btn.setAccessibleName("Suggest candidate segments")
+        self.segments_btn.setEnabled(False)
+
         self.trim_silences_btn = QPushButton("Trim silences")
         self.trim_silences_btn.setObjectName("ghostBtn")
         self.trim_silences_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -323,6 +334,7 @@ class VideoPlayer(QWidget):
         trim_row = QHBoxLayout()
         trim_row.setSpacing(10)
         trim_row.addWidget(self._trim_label, 1)
+        trim_row.addWidget(self.segments_btn)
         trim_row.addWidget(self.highlights_btn)
         trim_row.addWidget(self.trim_silences_btn)
         trim_row.addWidget(self.tighten_btn)
@@ -349,6 +361,7 @@ class VideoPlayer(QWidget):
         self.tighten_btn.setEnabled(True)
         self.highlights_btn.setEnabled(True)
         self.trim_silences_btn.setEnabled(True)
+        # segments button gated on clip length + cached transcript by the controller
         self._time.setProperty("tone", "accent")
         self._time.style().unpolish(self._time)
         self._time.style().polish(self._time)
@@ -388,6 +401,7 @@ class VideoPlayer(QWidget):
         self.tighten_btn.setEnabled(False)
         self.highlights_btn.setEnabled(False)
         self.trim_silences_btn.setEnabled(False)
+        self.segments_btn.setEnabled(False)
         self._time.setText("0:00 / 0:00")
         self._time.setProperty("tone", None)
         self._time.style().unpolish(self._time)

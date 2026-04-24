@@ -965,6 +965,7 @@ class MainWindow(QMainWindow):
         self._refresh_progress_hint()
         self._refresh_overview()
         self._refresh_hero_header()
+        self._ctl.refresh_segments_button()
 
     def _refresh_queue_count(self) -> None:
         n = self._queue.count()
