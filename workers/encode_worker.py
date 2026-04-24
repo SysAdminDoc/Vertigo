@@ -30,10 +30,24 @@ class EncodeWorker(QThread):
                 cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
+                self._unlink_partial()
                 self.failed.emit("Cancelled.")
             elif rc == 0:
                 self.finished_ok.emit(str(self._job.out_path))
             else:
+                self._unlink_partial()
                 self.failed.emit(f"FFmpeg exited {rc}")
         except Exception as e:
+            self._unlink_partial()
             self.failed.emit(f"{type(e).__name__}: {e}")
+
+    def _unlink_partial(self) -> None:
+        """Scrub the half-written output file so the user doesn't end up
+        with a truncated orphan (often hundreds of MB) alongside their
+        real exports. The pycaps swap path already does this for its
+        temp sibling; this brings the main encode path to parity.
+        """
+        try:
+            self._job.out_path.unlink(missing_ok=True)
+        except Exception:
+            pass

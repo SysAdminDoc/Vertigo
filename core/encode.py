@@ -268,25 +268,32 @@ def _double_bitrate(rate: str) -> str:
 
 
 def _subtitles_filter(srt_path: Path, preset: CaptionPreset, out_height: int) -> str:
-    """Build an FFmpeg `subtitles=` filter for burn-in.
+    """Build an FFmpeg ``subtitles=`` filter for burn-in.
 
     FFmpeg's filter-graph parser is fussy about path escaping:
-      * the whole argument is inside a filter-graph so every ``\\`` gets
-        consumed once by the graph parser and once by the filter itself;
+      * the whole argument is inside a filter-graph, so colons inside
+        the filename are treated as filter-option separators unless
+        each one is escaped as ``\\:``;
       * single-quoted filenames must escape embedded quotes as ``'\\''``
-        (close quote, escaped literal quote, reopen quote);
-      * on Windows the drive colon needs an additional ``\\:`` or the
-        parser splits the path at the ``D:`` boundary.
+        (close quote, escaped literal quote, reopen quote).
+
+    The old implementation only escaped the Windows **drive** colon
+    (``C:/foo``). A caption file at a path with a *second* colon
+    (unusual on Windows but trivial on POSIX timestamped paths, or
+    adversarial filenames) would slip an inner colon through and
+    libavfilter would split the ``subtitles=...`` argument at that
+    colon, interpreting the tail as additional filter options.
+    Escaping every colon closes the hole; the drive-colon case falls
+    out naturally.
 
     The ``force_style=`` block is generated from a resolution-relative
     ``CaptionPreset`` so the same preset renders correctly on 1080p,
     720p, 4K, etc.
     """
     s = str(srt_path.resolve()).replace("\\", "/")
-    # Escape the Windows drive colon ("C:/foo" -> "C\:/foo") so libavfilter
-    # doesn't split the filter argument at the colon.
-    if len(s) > 1 and s[1] == ":":
-        s = s[0] + r"\:" + s[2:]
+    # Escape EVERY colon as \: so libavfilter doesn't split args at any
+    # inner colon (Windows drive letter, timestamped path, filename).
+    s = s.replace(":", r"\:")
     # Escape single quotes inside the filename so they don't close our
     # wrapping quote. The FFmpeg-documented idiom is 'abc'\''def'.
     s = s.replace("'", r"'\''")

@@ -229,9 +229,10 @@ class ControllerPycapsBranchTests(unittest.TestCase):
             ctl.last_output_path = None
             ctl._on_pycaps_failed("RuntimeError: first-run crash")
 
-            # Failure path must not claim "Complete"; _set_export_status
-            # should read "Export failed" per _on_export_fail. We check
-            # that last_output_path was not overwritten with Path('.').
+            # Failure path must not claim "Complete"; status pill should
+            # read "Export failed" (set by _on_export_fail). And
+            # last_output_path must not have been corrupted to Path('.').
+            self.assertEqual(win._export_status.text(), "Export failed")
             self.assertNotEqual(ctl.last_output_path, Path())
             self.assertNotEqual(ctl.last_output_path, Path("."))
             self.assertIsNone(ctl._pending_pycaps)
