@@ -6,7 +6,7 @@
 
 **Vertical video studio for short-form creators.**
 
-![version](https://img.shields.io/badge/version-0.11.0-cba6f7?style=for-the-badge)
+![version](https://img.shields.io/badge/version-0.11.1-cba6f7?style=for-the-badge)
 ![license](https://img.shields.io/badge/license-MIT-a6e3a1?style=for-the-badge)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-89b4fa?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.10%2B-f9e2af?style=for-the-badge)
