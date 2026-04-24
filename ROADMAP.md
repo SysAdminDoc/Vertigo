@@ -191,6 +191,29 @@ never the latter.
   `clip_captions` and read that flag.
 
 - [x] **R5 · Bisect-based `_gap_before` / `_gap_after`** · v0.12.3
+
+## Tier 9 · v0.12.3 iter 2 — multilingual + observability parity
+
+- [ ] **R6 · Multilingual stop-list for segment proposals** · v0.12.3
+  `_STOP_WORDS` is English-only, so TextTiling cohesion on a French or
+  German transcript over-counts every `le` / `la` / `der` / `die` and
+  produces poor boundaries. Extend with es/fr/de/pt/it sibling
+  frozensets unioned into the main set. Charter-safe: no new deps, no
+  NLTK, the lists fit in-source.
+
+- [ ] **R7 · Route `_lazy.py` pip failures through crashlog** · v0.12.3
+  `core/_lazy.py:95` still uses the same `print(..., file=sys.stderr)`
+  pattern R3 just removed from `main_controller.shutdown`. Frozen
+  builds drop stderr, so the final-failure breadcrumb vanishes exactly
+  when forensic value is highest. Same fix — route through
+  `core.crashlog.append`.
+
+- [ ] **R8 · Harmonize crashlog path with `vertigo.py::_log_dir`** · v0.12.3
+  `core/crashlog.py` lowercases the Linux app dir (`vertigo/`) while
+  the bootstrap writes to `Vertigo/` — bootstrap-time fatal errors and
+  runtime breadcrumbs land in different files. Capitalise the Linux
+  path, add the APPDATA fallback on Windows, and honour the same
+  TEMP fallback on mkdir failure.
   Linear scan over every caption once per `_score_segment` call →
   O(N*M) on long transcripts (~100k comparisons on a two-hour clip).
   `bisect_left` / `bisect_right` on sorted caption-end / caption-start
