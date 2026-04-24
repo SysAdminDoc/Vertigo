@@ -161,6 +161,42 @@ never the latter.
   pair; no direct unit-test pinned that fix (the only assertion was
   indirect via reasons-string). Add direct tests.
 
+## Tier 8 · v0.12.3 polish + perf (factory-loop iter 1)
+
+- [x] **R1 · Prune stray audit PNGs from repo root** · v0.12.3
+  `_polish_iconstrip.png` / `_polish_modes.png` pre-date the
+  `_*.png` gitignore rule and are intermediate QA artifacts long
+  superseded by `assets/screenshots/`. Delete both, verify no
+  README / CHANGELOG / assets reference survives.
+
+- [x] **R2 · `WORKER_CANCELLED_MSG` constant** · v0.12.3
+  "Cancelled." appears as a magic string in nine non-test files (six
+  worker modules, three controller slots, `core/animated_captions`).
+  Move into `workers/__init__.py` (no import cycle) so a future
+  rename is a one-line change. Tests that pin the literal value
+  still pass — the runtime string is unchanged.
+
+- [x] **R3 · Shutdown warning via `core/crashlog.py`** · v0.12.3
+  `ui/main_controller.py:197` prints a worker-hang warning to
+  `sys.stderr`. Frozen PyInstaller builds discard stderr; the line
+  is effectively lost. Add a tiny `core/crashlog.py` that appends to
+  the user-data dir (`%LOCALAPPDATA%\\Vertigo\\crash.log`,
+  `~/.local/share/vertigo/crash.log`, `~/Library/Logs/Vertigo/`).
+  No-op safe, non-blocking, frozen-safe (not `_MEIPASS`).
+
+- [x] **R4 · Cache captions-has-text gate** · v0.12.3
+  `refresh_segments_button` currently does `any(c.text.strip() ...)`
+  on every click / queue update. On a 2-hour lecture transcript this
+  is 20k+ character scans per UI refresh. Store a `bool` alongside
+  `clip_captions` and read that flag.
+
+- [x] **R5 · Bisect-based `_gap_before` / `_gap_after`** · v0.12.3
+  Linear scan over every caption once per `_score_segment` call →
+  O(N*M) on long transcripts (~100k comparisons on a two-hour clip).
+  `bisect_left` / `bisect_right` on sorted caption-end / caption-start
+  arrays gives O(log N) per lookup, preserving the straddling-pair
+  return semantics (covered by the H8 regression tests).
+
 - [x] **T3c · Hook-energy score** · ~1 h · v0.9.0 · no new deps
   `core/hook_score.py` produces a 0–100 "first-3-second" score from
   FFmpeg-extracted 16 kHz mono PCM + per-frame RMS/ZCR voice

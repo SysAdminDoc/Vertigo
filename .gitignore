@@ -77,3 +77,4 @@ exports/
 models/
 *.onnx
 *.pt
+.factory/

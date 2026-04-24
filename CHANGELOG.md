@@ -2,6 +2,19 @@
 
 All notable changes to Vertigo are documented here.
 
+## [Unreleased]
+
+### Iter 1 — polish + perf (Tier 8)
+
+Factory-loop iteration advancing the "Next up" punch list from the v0.12.2 continuation brief. No new features; every task is visible only in the form of code that no longer scans, leaks, or drops warnings.
+
+- **Audit PNGs pruned from repo root.** `_polish_iconstrip.png` and `_polish_modes.png` pre-dated the `_*.png` gitignore rule and had been sitting in the repo as obsolete QA artifacts since v0.10. Deleted; nothing referenced them.
+- **`WORKER_CANCELLED_MSG` constant.** Replaces the `"Cancelled."` magic string across nine non-test files (six worker modules, three controller slots). Defined once in `workers/__init__.py`; a future rename is now a one-line change instead of a nine-file grep. Tests that pin the literal value are unchanged — the runtime string is identical.
+- **Shutdown-warning breadcrumbs survive frozen builds.** `ui/main_controller.shutdown()` previously logged worker-hang warnings via `print(..., file=sys.stderr)`. PyInstaller one-file builds discard stderr, so the warning was effectively lost exactly when it mattered most. New `core/crashlog.py` appends timestamped lines to a platform-appropriate user-data path (`%LOCALAPPDATA%\Vertigo\crash.log`, `~/Library/Logs/Vertigo/`, `$XDG_STATE_HOME/vertigo/`). No-op safe, cap-rotated at 256 KiB via `os.replace` atomic swap, explicit guard that refuses any candidate path under `sys._MEIPASS`.
+- **Captions-has-text gate is O(1).** `MainController.refresh_segments_button()` used to do `any(c.text.strip() ...)` over the cached caption list on every UI refresh — and the gate fires on queue change, subs ready, subs cleared, trim change, and duration probe. New `_captions_has_text: dict[int, bool]` flag is populated once at caption-write time by the new `_set_cached_captions()` helper, and invalidated in `drop_clip_subs` / `on_subs_cleared`. 2-hour lecture transcripts no longer re-scan 20 k captions per click.
+- **`_gap_before` / `_gap_after` use bisect.** Linear scan over every caption per `_score_segment` call was O(N·M) for M candidate segments — ~100 k comparisons on a two-hour clip. New shared `_straddling_gap()` takes a precomputed `starts` array and does `bisect_left`, dropping the cost to O(log N) per lookup. `propose_segments` precomputes the array once and threads it through scoring. New regression test pins scaling and bit-for-bit equivalence against the prior linear path.
+- **Test suite**: 144 → 154 passing (+8 `tests/test_crashlog.py`, +2 `tests/test_segment_proposals.py` for bisect scaling + parity).
+
 ## [0.12.2] - 2026-04-24
 
 ### Postflight security + review findings
