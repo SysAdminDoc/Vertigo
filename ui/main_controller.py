@@ -49,10 +49,12 @@ from PyQt6.QtCore import QObject, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QFontMetrics
 from PyQt6.QtWidgets import QMenu, QMessageBox
 
+from core import crashlog
 from core.encode import EncodeJob
 from core.probe import VideoInfo, probe
 from core.reframe import ReframeMode, build_plan
 from core.subtitles import is_installed as subtitles_installed
+from workers import WORKER_CANCELLED_MSG
 from workers.detect_worker import DetectWorker
 from workers.encode_worker import EncodeWorker
 from workers.scene_worker import SceneWorker
@@ -109,6 +111,11 @@ class MainController(QObject):
         # the template so the post-encode step can hand pycaps its
         # transcript without a second Whisper pass.
         self.clip_captions: dict[int, list] = {}
+        # Parallel cache of the O(n) "has any non-whitespace caption text"
+        # gate used by refresh_segments_button(). Computed once at write
+        # time so per-UI-refresh reads are O(1) regardless of transcript
+        # length (2-hour lectures produce ~20k captions on a fast model).
+        self._captions_has_text: dict[int, bool] = {}
         self.animated_styles: dict[int, str] = {}
 
         # batch driver state
@@ -171,11 +178,10 @@ class MainController(QObject):
         cleanly even when a long-running encode or transcribe is in
         flight. Scene detection is fire-and-forget and is not cancelled
         by cancel_active(), so we stop it here explicitly. Workers that
-        fail to finish within the timeout are surfaced on stderr so a
-        packaging build leaves breadcrumbs in ``crash.log``.
+        fail to finish within the timeout leave a breadcrumb via
+        :func:`core.crashlog.append`, which survives the frozen-build
+        stderr drop.
         """
-        import sys
-
         self.cancel_active()
         if self.scene_worker is not None and self.scene_worker.isRunning():
             self.scene_worker.cancel()
@@ -193,14 +199,14 @@ class MainController(QObject):
             if worker is None or not worker.isRunning():
                 continue
             if not worker.wait(timeout_ms):
-                try:
-                    print(
-                        f"[Vertigo] Warning: {type(worker).__name__} did not "
-                        f"finish within {timeout_ms}ms on shutdown",
-                        file=sys.stderr,
-                    )
-                except Exception:
-                    pass
+                # Frozen PyInstaller builds discard stderr, so the old
+                # print() here was effectively invisible. Route through
+                # the persistent crash log instead — crashlog.append is
+                # no-op safe and never raises.
+                crashlog.append(
+                    f"{type(worker).__name__} did not finish within "
+                    f"{timeout_ms}ms on shutdown"
+                )
 
     def drop_clip_subs(self, entry_id: int) -> None:
         """Release per-clip subtitle state for a removed queue entry.
@@ -216,7 +222,22 @@ class MainController(QObject):
             except Exception:
                 pass
         self.clip_captions.pop(entry_id, None)
+        self._captions_has_text.pop(entry_id, None)
         self.animated_styles.pop(entry_id, None)
+
+    def _set_cached_captions(self, entry_id: int, captions: list) -> None:
+        """Write both the caption list and the ``has non-empty text`` flag.
+
+        Everywhere captions land (subtitle worker, tests that pre-seed the
+        cache) should route through here so the flag stays in sync. The
+        scan is O(n) once at write time but short-circuits on the first
+        non-empty caption — typical transcripts satisfy the gate inside
+        the first dozen entries.
+        """
+        self.clip_captions[entry_id] = captions
+        self._captions_has_text[entry_id] = any(
+            getattr(c, "text", "").strip() for c in captions
+        )
 
     # --------------------------------------------------------------- captions
     def on_subs_cleared(self) -> None:
@@ -232,6 +253,7 @@ class MainController(QObject):
         # user just asked us to forget.
         if current:
             self.clip_captions.pop(current.id, None)
+            self._captions_has_text.pop(current.id, None)
             self.animated_styles.pop(current.id, None)
         self.win._refresh_overview()
         self.refresh_segments_button()
@@ -304,7 +326,7 @@ class MainController(QObject):
         self.subtitle_worker.progress.connect(w._subs_panel.set_progress)
         self.subtitle_worker.status.connect(w._subs_panel.set_status)
         self.subtitle_worker.captions_ready.connect(
-            lambda caps, eid=entry_id: self.clip_captions.__setitem__(eid, caps)
+            lambda caps, eid=entry_id: self._set_cached_captions(eid, caps)
         )
         self.subtitle_worker.finished_ok.connect(
             lambda srt, eid=entry_id: self._on_subs_done(srt, eid)
@@ -430,7 +452,7 @@ class MainController(QObject):
         self.vad_worker = None
         w = self.win
         w._player.tighten_btn.setEnabled(True)
-        if msg == "Cancelled.":
+        if msg == WORKER_CANCELLED_MSG:
             return
         w._toast.show_toast(msg, kind="warning")
 
@@ -475,7 +497,7 @@ class MainController(QObject):
         self.highlights_worker = None
         w = self.win
         w._player.highlights_btn.setEnabled(True)
-        if msg == "Cancelled.":
+        if msg == WORKER_CANCELLED_MSG:
             return
         w._toast.show_toast(msg, kind="warning")
 
@@ -541,8 +563,11 @@ class MainController(QObject):
         info = w._info
         entry = w._current_entry
         has_long_clip = bool(info) and should_propose_for_duration(float(info.duration or 0.0))
-        cached = self.clip_captions.get(entry.id) if entry else None
-        has_captions = bool(cached) and any(getattr(c, "text", "").strip() for c in cached)
+        # O(1) lookup against the flag cache populated by
+        # _set_cached_captions — avoids scanning every caption on every
+        # UI refresh (hot path: called on queue change, subs clear,
+        # subs ready, trim change, duration probe).
+        has_captions = bool(entry) and self._captions_has_text.get(entry.id, False)
         btn.setEnabled(has_long_clip and has_captions)
         if has_long_clip and not has_captions:
             btn.setToolTip(
@@ -610,7 +635,7 @@ class MainController(QObject):
     def _on_segments_failed(self, msg: str) -> None:
         self.segments_worker = None
         self.refresh_segments_button()
-        if msg == "Cancelled.":
+        if msg == WORKER_CANCELLED_MSG:
             return
         self.win._toast.show_toast(msg, kind="warning")
 
@@ -704,7 +729,7 @@ class MainController(QObject):
         self.auto_edit_worker = None
         w = self.win
         w._player.trim_silences_btn.setEnabled(True)
-        if msg == "Cancelled.":
+        if msg == WORKER_CANCELLED_MSG:
             return
         w._toast.show_toast(msg, kind="warning")
 
@@ -1211,14 +1236,14 @@ class MainController(QObject):
             except Exception:
                 pass
 
-        cancelled = msg == "Cancelled."
+        cancelled = msg == WORKER_CANCELLED_MSG
 
         # No usable reframed file means pycaps failed before the main
         # encode produced anything — route through the honest-failure
         # path rather than claim "Complete" on an empty ``Path('.')``.
         usable = reframed_out is not None and reframed_out.exists()
         if not usable:
-            reason = "Cancelled." if cancelled else f"{msg} (no reframed output to fall back to)"
+            reason = WORKER_CANCELLED_MSG if cancelled else f"{msg} (no reframed output to fall back to)"
             self._append_log(f"[pycaps error] {reason}")
             self._on_export_fail(reason, entry_id)
             return
