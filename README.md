@@ -38,6 +38,27 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Turnkey bootstrap** — single-command launch, auto-installs missing Python deps on first run.
 - **Binary builds** — `pyinstaller --clean vertigo.spec` produces single-file Windows, macOS `.app`, and Linux exes. GitHub Actions workflow builds all three on every tag push (or `workflow_dispatch`) and uploads to a draft release via `gh release upload --clobber`.
 
+## Optional integrations
+
+Each module under `core/` below is usable on its own and ships with a clean fallback when the heavy dependency is absent. Install only what you need:
+
+```bash
+pip install -r requirements-optional.txt   # everything, or
+pip install silero-vad                     # cherry-pick
+```
+
+| Module | What it adds | Heavy dep | Fallback when missing |
+|---|---|---|---|
+| `core.vad` | Silero voice-activity detection → "tighten silences" trim | `silero-vad` (ONNX, <2 MB) | raises with clear install hint |
+| `core.animated_captions` | pycaps per-word animated caption overlays (pop / bounce / karaoke) | `pycaps` | keeps the ASS/SRT output |
+| `core.tracker_boxmot` | BoT-SORT / ByteTrack / DeepOCSORT speaker tracking with stable IDs across occlusion | `boxmot` (AGPL-3.0) | existing `SpeakerTracker` |
+| `core.auto_edit` | Silence- and motion-driven cut planning from auto-editor | `auto-editor` CLI | raises with install hint |
+| `core.highlights` | Lighthouse moment retrieval with optional text query | `lighthouse-ml` | sliding-window `hook_score` fallback |
+| `core.cluster_track` | Per-frame face clustering + temporal-persistence filter (RetargetVid port) | none (numpy) | — |
+| `core.diarize` | pyannote speaker diarization ("who spoke when") | `pyannote.audio` + HF token | raises with clear error |
+| `core.broll` | Transcript → keywords → Pexels stock search → CLIP re-rank → overlay plan | `keybert` / `open_clip_torch` / Pexels API key | stdlib keyword picker + Pexels native rank |
+| `core.keyframes` | Katna-ranked thumbnails for clip cards and poster export | `Katna` | evenly-spaced cv2 frames |
+
 ## Install
 
 ```bash
