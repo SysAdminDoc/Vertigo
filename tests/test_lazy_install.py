@@ -93,6 +93,55 @@ class LazyInstallFrozenGuardTests(unittest.TestCase):
                 self.assertFalse(_lazy.pip_install("fakepkg>=0"))
         self.assertEqual(runner.call_count, 3)
 
+    def test_pip_install_failure_breadcrumbs_crashlog(self) -> None:
+        """Every-strategy-failed path must leave a crumb in crash.log.
+
+        Frozen builds drop stderr, so the old ``print(file=sys.stderr)``
+        branch was effectively invisible on the very binaries where the
+        forensic value was highest. R7 routes through ``core.crashlog``
+        instead; pin that here so a regression that reverts to stderr
+        fails loudly.
+        """
+        import os
+        import tempfile
+        from core import _lazy
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "crash.log")
+            os.environ["VERTIGO_CRASH_LOG"] = target
+            try:
+                runner = mock.MagicMock(side_effect=OSError("pip missing"))
+                with mock.patch.object(_lazy, "is_frozen", return_value=False):
+                    with mock.patch.object(_lazy, "_pip_runner", runner):
+                        self.assertFalse(_lazy.pip_install("fakepkg>=0"))
+                self.assertTrue(os.path.exists(target), "crash.log was not created")
+                body = open(target, encoding="utf-8").read()
+                self.assertIn("fakepkg>=0", body)
+                self.assertIn("OSError", body)
+            finally:
+                os.environ.pop("VERTIGO_CRASH_LOG", None)
+
+    def test_frozen_path_writes_nothing_to_crashlog(self) -> None:
+        """Frozen short-circuit must never touch crash.log either —
+        we don't want a binary that *declines* to install to still
+        leave log detritus on every opt-in call."""
+        import os
+        import tempfile
+        from core import _lazy
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "crash.log")
+            os.environ["VERTIGO_CRASH_LOG"] = target
+            try:
+                with mock.patch.object(_lazy, "is_frozen", return_value=True):
+                    self.assertFalse(_lazy.pip_install("frozendep>=0"))
+                self.assertFalse(
+                    os.path.exists(target),
+                    "frozen path created a crash.log entry",
+                )
+            finally:
+                os.environ.pop("VERTIGO_CRASH_LOG", None)
+
     def test_default_runner_is_subprocess_call(self) -> None:
         from core import _lazy
 

@@ -88,11 +88,11 @@ def pip_install(spec: str) -> bool:
                 last_error = f"{type(e).__name__}: {e}"
                 continue
     if last_error is not None:
-        # Breadcrumb for ``crash.log`` — quiet on stdout when the runner
-        # merely returned non-zero; loud only when *every* strategy hit
-        # an exception (typically pip itself missing).
-        try:
-            print(f"[Vertigo] pip_install({spec!r}) failed: {last_error}", file=sys.stderr)
-        except Exception:
-            pass
+        # Breadcrumb for the persistent crash log — quiet on stdout when
+        # the runner merely returned non-zero; loud only when *every*
+        # strategy hit an exception (typically pip itself missing). The
+        # frozen-build stderr drop means the old print() here was
+        # effectively invisible exactly when forensic value was highest.
+        from . import crashlog
+        crashlog.append(f"pip_install({spec!r}) failed: {last_error}")
     return False
