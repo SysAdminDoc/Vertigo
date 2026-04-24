@@ -13,9 +13,9 @@ Signals
 finished_ok(str)
     Path to the freshly-composited MP4 (caller swaps it into place).
 failed(str)
-    Human-readable error. The literal ``"Cancelled."`` is reserved
-    for user-triggered cancel so the controller can suppress the
-    toast on that path.
+    Human-readable error. The sentinel ``WORKER_CANCELLED_MSG``
+    (currently ``"Cancelled."``) is reserved for user-triggered
+    cancel so the controller can suppress the toast on that path.
 """
 
 from __future__ import annotations

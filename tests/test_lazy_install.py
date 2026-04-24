@@ -1,11 +1,18 @@
 """Regression tests for the unified ``core._lazy`` install helper.
 
-Pins the v0.12.0 fork-bomb fix. Every opt-in ``core/*`` module that
-pip-installs on demand must route through :func:`core._lazy.pip_install`
-*and* that helper must short-circuit when :func:`core._lazy.is_frozen`
-is True. If a future change re-introduces the per-module copy of
-``_try_pip_install`` using ``[sys.executable, "-m", "pip", ...]``, this
-test will fail.
+Pins two contracts:
+
+* **v0.12.0 fork-bomb fix.** Every opt-in ``core/*`` module that
+  pip-installs on demand must route through
+  :func:`core._lazy.pip_install` *and* that helper must short-circuit
+  when :func:`core._lazy.is_frozen` is True. If a future change
+  re-introduces the per-module copy of ``_try_pip_install`` using
+  ``[sys.executable, "-m", "pip", ...]``, this test will fail.
+* **v0.12.3 R7 crashlog-breadcrumb contract.** The every-strategy-failed
+  path lands in the persistent crash log, never in a stderr handle
+  that PyInstaller's GUI bundle discards. The frozen short-circuit
+  stays quiet — no crashlog noise from binaries that merely decline
+  to install.
 
 Why this matters: ``sys.executable`` in a PyInstaller build is
 ``Vertigo.exe`` itself, so spawning it with ``-m pip`` does not run pip

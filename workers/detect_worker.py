@@ -7,7 +7,7 @@ face-per-frame path so callers with no clip geometry still get a track.
 
 Cancel contract (matches SubtitleWorker):
     * ``cancel()`` sets a flag polled by the tracker's cancel_cb.
-    * On cancel, we emit ``failed("Cancelled.")`` rather than
+    * On cancel, we emit ``failed(WORKER_CANCELLED_MSG)`` rather than
       ``finished_ok(partial_points)`` — the main window treats
       finished_ok as an authoritative track and would pass the
       half-finished data to the export pipeline.

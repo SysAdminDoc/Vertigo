@@ -121,10 +121,19 @@ def _rotate_if_needed(path: Path) -> None:
             f.seek(-_MAX_BYTES // 2, os.SEEK_END)
             tail = f.read()
         tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("wb") as f:
-            f.write(b"# crash.log rotated\n")
-            f.write(tail)
-        os.replace(tmp, path)
+        try:
+            with tmp.open("wb") as f:
+                f.write(b"# crash.log rotated\n")
+                f.write(tail)
+            os.replace(tmp, path)
+        except Exception:
+            # Windows AV / tail -f can hold an exclusive handle on the
+            # log file, turning os.replace into PermissionError. Clean
+            # up the tmp so the orphan doesn't sit between rotations.
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
     except Exception:
         pass
 

@@ -26,7 +26,9 @@ Algorithm
    over the stream and compute Jaccard similarity between their
    content-word sets. Low-similarity "valleys" are topic boundaries.
    Boundary candidates are also promoted when a silence gap
-   (``gap_seconds``) appears between successive captions.
+   (``gap_seconds``) appears between successive captions. Stop-words
+   stripped via small per-language frozensets unioned into
+   ``_STOP_WORDS`` (en/es/fr/de/pt/it); no NLTK dependency.
 
 3. **Segment assembly** — walk the boundary list greedily, collecting
    adjacent topics until the running duration enters the

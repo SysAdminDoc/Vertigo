@@ -102,6 +102,7 @@ vertigo.spec              PyInstaller build spec (single-file, per-OS icon)
 core/
   _lazy.py                shared pip-install helper with frozen-build guard + threading.Lock
   caption_types.py        Caption + Word dataclasses (lifted from subtitles for clean imports)
+  crashlog.py             persistent breadcrumb log — survives frozen-build stderr drop
   probe.py                ffprobe wrapper (VideoInfo dataclass)
   presets.py              platform output presets (Shorts/TikTok/Reels/Square)
   detect.py               MediaPipe face tracker (Haar fallback)
