@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import unittest
 
+from core.caption_types import Caption, Word
 from core.segment_proposals import (
     DEFAULT_MAX_SEC,
     DEFAULT_MIN_CLIP_SEC_FOR_PROPOSALS,
     DEFAULT_MIN_SEC,
     DEFAULT_TARGET_SEC,
     SegmentProposal,
+    _gap_after,
+    _gap_before,
     propose_segments,
     should_propose_for_duration,
 )
-from core.subtitles import Caption, Word
 
 
 def _cap(start: float, end: float, text: str, words: tuple[Word, ...] = ()) -> Caption:
@@ -169,6 +171,111 @@ class SegmentProposalsTests(unittest.TestCase):
             self.assertEqual(c.words, ())
         out = propose_segments(caps)
         self.assertGreater(len(out), 0)
+
+
+class GapHelperTests(unittest.TestCase):
+    """Direct unit tests for the ``_gap_before`` / ``_gap_after`` fix.
+
+    v0.12.0 rewrote both to find the pair that *straddles* the target
+    time instead of the first-crossing pair. These tests pin the
+    correct behaviour so a regression re-introduces the shadowed bug.
+    """
+
+    def _caps(self) -> list[Caption]:
+        #          cap A     gap 1    cap B     gap 2    cap C
+        # 0 ----- 5 ====== 8 ------- 10 ====== 15 ------ 22 ====== 28
+        return [
+            Caption(0.0, 5.0, "alpha"),
+            Caption(8.0, 10.0, "bravo"),
+            Caption(15.0, 22.0, "charlie"),
+            Caption(28.0, 30.0, "delta"),
+        ]
+
+    def test_gap_before_finds_straddling_gap(self) -> None:
+        caps = self._caps()
+        # target t=11 sits in the 10..15 gap → gap is 5s
+        self.assertAlmostEqual(_gap_before(11.0, caps), 5.0)
+        # target t=7 sits in the 5..8 gap → gap is 3s
+        self.assertAlmostEqual(_gap_before(7.0, caps), 3.0)
+        # target t=25 sits in the 22..28 gap → gap is 6s
+        self.assertAlmostEqual(_gap_before(25.0, caps), 6.0)
+
+    def test_gap_before_inside_caption_returns_zero(self) -> None:
+        caps = self._caps()
+        # target t=3 lands inside cap A (0..5) — not a straddling gap
+        self.assertEqual(_gap_before(3.0, caps), 0.0)
+        # target t=16 lands inside cap C (15..22) — not a straddling gap
+        self.assertEqual(_gap_before(16.0, caps), 0.0)
+
+    def test_gap_after_mirrors_gap_before(self) -> None:
+        caps = self._caps()
+        # t=9 is inside cap B (8..10), not a gap → zero
+        self.assertEqual(_gap_after(9.0, caps), 0.0)
+        # t=6 is in gap 5..8 → 3s straddling gap
+        self.assertAlmostEqual(_gap_after(6.0, caps), 3.0)
+        # symmetric to gap_before: t=11 is in gap 10..15 → 5s
+        self.assertAlmostEqual(_gap_after(11.0, caps), 5.0)
+        # t=25 is in gap 22..28 → 6s
+        self.assertAlmostEqual(_gap_after(25.0, caps), 6.0)
+
+    def test_empty_or_single_caption_returns_zero(self) -> None:
+        self.assertEqual(_gap_before(5.0, []), 0.0)
+        self.assertEqual(_gap_after(5.0, []), 0.0)
+        single = [Caption(0.0, 10.0, "alone")]
+        self.assertEqual(_gap_before(5.0, single), 0.0)
+        self.assertEqual(_gap_after(5.0, single), 0.0)
+
+
+class PropsCancelCooperationTests(unittest.TestCase):
+    """H5: ``propose_segments`` honours ``cancel_cb`` at loop heads."""
+
+    def test_immediate_cancel_returns_empty(self) -> None:
+        caps = _synthetic_long_transcript()
+        calls = {"n": 0}
+
+        def cancel() -> bool:
+            calls["n"] += 1
+            return True
+
+        out = propose_segments(caps, cancel_cb=cancel)
+        self.assertEqual(out, [])
+        # Cancel was checked at least once before any heavy work.
+        self.assertGreaterEqual(calls["n"], 1)
+
+    def test_cancel_after_boundaries_returns_empty(self) -> None:
+        caps = _synthetic_long_transcript()
+        ticks = {"n": 0}
+
+        def cancel() -> bool:
+            # Allow initial pre-checks, then cancel between boundary scan
+            # and assembly.
+            ticks["n"] += 1
+            return ticks["n"] > 2
+
+        out = propose_segments(caps, cancel_cb=cancel)
+        self.assertEqual(out, [])
+
+    def test_non_cancelling_run_produces_proposals(self) -> None:
+        caps = _synthetic_long_transcript()
+        out = propose_segments(caps, cancel_cb=lambda: False)
+        self.assertGreater(len(out), 0)
+
+
+class SubtitlesReExportsCaptionTypesTests(unittest.TestCase):
+    """H6: lifting Caption/Word into core/caption_types.py should not
+    break existing ``from core.subtitles import Caption, Word`` callers."""
+
+    def test_core_subtitles_still_exports_caption_and_word(self) -> None:
+        from core import subtitles
+
+        self.assertTrue(hasattr(subtitles, "Caption"))
+        self.assertTrue(hasattr(subtitles, "Word"))
+
+    def test_caption_types_and_subtitles_share_the_same_classes(self) -> None:
+        from core import caption_types, subtitles
+
+        self.assertIs(caption_types.Caption, subtitles.Caption)
+        self.assertIs(caption_types.Word, subtitles.Word)
 
 
 if __name__ == "__main__":

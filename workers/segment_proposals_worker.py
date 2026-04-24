@@ -45,6 +45,7 @@ class SegmentProposalsWorker(QThread):
                 max_sec=self._max_sec,
                 target_sec=self._target_sec,
                 top_n=self._top_n,
+                cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
                 self.failed.emit("Cancelled.")

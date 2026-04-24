@@ -12,31 +12,33 @@ Output format is chosen by the active caption preset:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .caption_layout import ALIGN_BOTTOM_CENTER, ALIGN_TOP_CENTER, plan_alignments
 from .caption_styles import CaptionPreset, default_preset, style_for_height
+from .caption_types import Caption, Word  # re-exported for binary compat
 from .face_samples import FaceSample, sample_faces
 
 
 DEFAULT_MODEL = "small"
 AVAILABLE_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 
-
-@dataclass(frozen=True)
-class Word:
-    start: float
-    end: float
-    text: str
-
-
-@dataclass(frozen=True)
-class Caption:
-    start: float
-    end: float
-    text: str
-    words: tuple[Word, ...] = field(default_factory=tuple)
+__all__ = [
+    "AVAILABLE_MODELS",
+    "Caption",
+    "DEFAULT_MODEL",
+    "TranscribeResult",
+    "Word",
+    "ensure_installed",
+    "is_installed",
+    "transcribe",
+    "transcribe_and_write",
+    "transcribe_to_file",
+    "transcribe_to_srt",
+    "write_ass",
+    "write_srt",
+]
 
 
 def is_installed() -> bool:

@@ -48,7 +48,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from .subtitles import Caption
+from .caption_types import Caption
 
 
 # ---------------------------------------------------------------- tunables
@@ -119,11 +119,18 @@ def propose_segments(
     max_sec: float = DEFAULT_MAX_SEC,
     target_sec: float = DEFAULT_TARGET_SEC,
     top_n: int = DEFAULT_TOP_N,
+    cancel_cb=None,
 ) -> list[SegmentProposal]:
     """Return up to ``top_n`` ranked :class:`SegmentProposal` records.
 
     Empty caption lists and clips shorter than ``min_sec`` both return
     an empty list — callers should gate on clip duration before calling.
+
+    ``cancel_cb`` is a zero-arg callable polled at the outer loop heads
+    of the TextTiling sweep / assembly / scoring. When it returns truthy
+    the function short-circuits and returns whatever proposals were
+    already finalised (possibly the empty list). Wire from a
+    ``QThread._cancel`` flag for responsive cancel on very long clips.
     """
     if not captions or target_sec <= 0 or min_sec <= 0 or max_sec <= min_sec:
         return []
@@ -132,19 +139,34 @@ def propose_segments(
     if total_span < min_sec:
         return []
 
+    if cancel_cb and cancel_cb():
+        return []
+
     tokens = _token_stream(captions)
     if len(tokens) < _WINDOW_TOKENS * 2:
         # Too short for TextTiling — treat the whole clip as a single segment.
         segs = [(captions[0].start, captions[-1].end)]
     else:
-        boundaries = _boundaries(tokens, captions)
-        segs = _assemble_segments(boundaries, min_sec=min_sec, max_sec=max_sec, target_sec=target_sec)
+        boundaries = _boundaries(tokens, captions, cancel_cb=cancel_cb)
+        if cancel_cb and cancel_cb():
+            return []
+        segs = _assemble_segments(
+            boundaries,
+            min_sec=min_sec,
+            max_sec=max_sec,
+            target_sec=target_sec,
+            cancel_cb=cancel_cb,
+        )
 
     proposals: list[SegmentProposal] = []
     for seg_start, seg_end in segs:
+        if cancel_cb and cancel_cb():
+            return []
         if seg_end - seg_start < min_sec:
             continue
-        prop = _score_segment(seg_start, seg_end, captions, target_sec)
+        prop = _score_segment(seg_start, seg_end, captions, target_sec, cancel_cb=cancel_cb)
+        if prop is None:  # cancel fired mid-scoring
+            return []
         # Drop pure-silence regions: a segment that covers a gap between
         # topic clusters and holds no transcribed content isn't a useful
         # jump-to candidate.
@@ -200,13 +222,22 @@ def _token_stream(captions: list[Caption]) -> list[tuple[float, str]]:
 # ---------------------------------------------------------------- boundaries
 
 
-def _boundaries(tokens: list[tuple[float, str]], captions: list[Caption]) -> list[float]:
+def _boundaries(
+    tokens: list[tuple[float, str]],
+    captions: list[Caption],
+    *,
+    cancel_cb=None,
+) -> list[float]:
     """TextTiling-style boundary timestamps, augmented with silence gaps."""
     out: set[float] = {captions[0].start, captions[-1].end}
 
     # 1) topic-shift valleys via Jaccard between adjacent windows
     K = _WINDOW_TOKENS
     for i in range(K, len(tokens) - K):
+        # Poll at a coarse interval; boundary search is usually fast but
+        # can take tens of ms on hour-long transcripts.
+        if cancel_cb and (i & 0xff) == 0 and cancel_cb():
+            return sorted(out)
         left = {t for _, t in tokens[i - K:i]}
         right = {t for _, t in tokens[i:i + K]}
         if not left or not right:
@@ -238,6 +269,7 @@ def _assemble_segments(
     min_sec: float,
     max_sec: float,
     target_sec: float,
+    cancel_cb=None,
 ) -> list[tuple[float, float]]:
     """Walk boundary list forward, emitting segments that land in
     ``[min_sec, max_sec]`` — never crossing ``max_sec``. Greedy, not
@@ -248,6 +280,8 @@ def _assemble_segments(
 
     i = 0
     while i < len(boundaries) - 1:
+        if cancel_cb and cancel_cb():
+            return segs
         start = boundaries[i]
         # pick the boundary that best matches target_sec but stays within max_sec
         best_j = i + 1
@@ -289,9 +323,22 @@ def _score_segment(
     end: float,
     captions: list[Caption],
     target_sec: float,
-) -> SegmentProposal:
-    """Deterministic 0-1 score. Higher == stronger candidate."""
-    inside = [c for c in captions if c.end > start and c.start < end]
+    *,
+    cancel_cb=None,
+) -> SegmentProposal | None:
+    """Deterministic 0-1 score. Higher == stronger candidate.
+
+    Returns ``None`` if ``cancel_cb`` fires during the caption filter —
+    scoring can dominate wall-time on transcripts with thousands of
+    captions, so propagating cancel all the way here keeps user-cancel
+    responsive on pathologically long clips.
+    """
+    inside: list[Caption] = []
+    for c in captions:
+        if cancel_cb and cancel_cb():
+            return None
+        if c.end > start and c.start < end:
+            inside.append(c)
     joined = " ".join(c.text for c in inside if c.text).strip()
 
     questions = len(_QUESTION_RE.findall(joined))
