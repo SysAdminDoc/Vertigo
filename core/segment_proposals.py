@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import math
 import re
+from bisect import bisect_left
 from dataclasses import dataclass, field
 
 from .caption_types import Caption
@@ -158,13 +159,22 @@ def propose_segments(
             cancel_cb=cancel_cb,
         )
 
+    # Precompute the sorted caption-start index once per call so the
+    # straddling-pair gap lookups inside `_score_segment` drop from an
+    # O(N) linear scan to an O(log N) bisect per candidate. Saves the
+    # bulk of the scoring pass on hour-plus transcripts where segments
+    # can reach into the hundreds.
+    starts = [c.start for c in captions]
     proposals: list[SegmentProposal] = []
     for seg_start, seg_end in segs:
         if cancel_cb and cancel_cb():
             return []
         if seg_end - seg_start < min_sec:
             continue
-        prop = _score_segment(seg_start, seg_end, captions, target_sec, cancel_cb=cancel_cb)
+        prop = _score_segment(
+            seg_start, seg_end, captions, target_sec,
+            cancel_cb=cancel_cb, starts=starts,
+        )
         if prop is None:  # cancel fired mid-scoring
             return []
         # Drop pure-silence regions: a segment that covers a gap between
@@ -325,6 +335,7 @@ def _score_segment(
     target_sec: float,
     *,
     cancel_cb=None,
+    starts: list[float] | None = None,
 ) -> SegmentProposal | None:
     """Deterministic 0-1 score. Higher == stronger candidate.
 
@@ -345,8 +356,8 @@ def _score_segment(
     laughter = len(_LAUGH_RE.findall(joined))
 
     # Silence-gap edges — reward segments flanked by quiet air; easier to cut.
-    gap_before = _gap_before(start, captions)
-    gap_after = _gap_after(end, captions)
+    gap_before = _gap_before(start, captions, starts=starts)
+    gap_after = _gap_after(end, captions, starts=starts)
     edge_bonus = 0.0
     if gap_before >= _SILENCE_BOUNDARY_SEC:
         edge_bonus += 0.15
@@ -394,35 +405,64 @@ def _score_segment(
     )
 
 
-def _gap_before(t: float, captions: list[Caption]) -> float:
+def _straddling_gap(
+    t: float,
+    captions: list[Caption],
+    starts: list[float] | None,
+) -> float:
+    """O(log N) straddling-pair gap lookup.
+
+    Returns ``b.start - a.end`` for the pair where ``a.end <= t <= b.start``,
+    or ``0.0`` if ``t`` lands inside a caption or outside the span. Callers
+    that scan many segments against the same caption list should pass
+    the precomputed ``starts`` array so we don't rebuild it per lookup.
+    """
+    n = len(captions)
+    if n < 2:
+        return 0.0
+    if starts is None:
+        starts = [c.start for c in captions]
+    # First index whose start >= t. The straddling pair, if any, is
+    # (idx - 1, idx). Both ends of the span short-circuit to zero.
+    idx = bisect_left(starts, t)
+    if idx == 0 or idx >= n:
+        return 0.0
+    a = captions[idx - 1]
+    b = captions[idx]
+    if a.end <= t <= b.start:
+        return max(0.0, b.start - a.end)
+    return 0.0
+
+
+def _gap_before(
+    t: float,
+    captions: list[Caption],
+    *,
+    starts: list[float] | None = None,
+) -> float:
     """Silence duration immediately preceding ``t``.
 
-    Walks forward until the pair ``(a, b)`` straddles ``t`` — i.e.
-    ``a.end <= t <= b.start`` — and returns ``b.start - a.end``. If
-    ``t`` lands inside a caption (no straddling pair) the gap is zero.
-    Returns zero on empty / single-entry input.
+    Thin wrapper over :func:`_straddling_gap` — finds the pair
+    ``(a, b)`` that straddles ``t`` (``a.end <= t <= b.start``) and
+    returns ``b.start - a.end``. If ``t`` lands inside a caption the
+    gap is zero. Returns zero on empty / single-entry input.
     """
-    for a, b in zip(captions, captions[1:]):
-        if a.end <= t <= b.start:
-            return max(0.0, b.start - a.end)
-        if b.start > t:
-            # past the crossing; no straddling gap
-            return 0.0
-    return 0.0
+    return _straddling_gap(t, captions, starts)
 
 
-def _gap_after(t: float, captions: list[Caption]) -> float:
+def _gap_after(
+    t: float,
+    captions: list[Caption],
+    *,
+    starts: list[float] | None = None,
+) -> float:
     """Silence duration immediately following ``t``.
 
-    Mirror of :func:`_gap_before` — finds the pair where ``t`` sits on
-    or after ``a.end`` and before ``b.start`` and returns that gap.
+    Mirror of :func:`_gap_before` — same straddling-pair semantics; the
+    two names preserve the call-site documentation ("gap before segment
+    start" vs. "gap after segment end").
     """
-    for a, b in zip(captions, captions[1:]):
-        if a.end <= t <= b.start:
-            return max(0.0, b.start - a.end)
-        if a.end > t:
-            return 0.0
-    return 0.0
+    return _straddling_gap(t, captions, starts)
 
 
 def _title_hint_from(joined: str, *, max_len: int = 60) -> str:

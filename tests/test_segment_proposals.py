@@ -225,6 +225,49 @@ class GapHelperTests(unittest.TestCase):
         self.assertEqual(_gap_before(5.0, single), 0.0)
         self.assertEqual(_gap_after(5.0, single), 0.0)
 
+    def test_bisect_fast_path_matches_linear_semantics(self) -> None:
+        """Precomputed-starts path must mirror the no-starts path exactly.
+
+        The performance optimisation threads a precomputed ``starts``
+        list through scoring to skip the per-call O(n) build; the two
+        entry points must remain bit-for-bit equivalent for the
+        surrounding scoring logic to stay stable.
+        """
+        caps = self._caps()
+        starts = [c.start for c in caps]
+        for t in (3.0, 5.0, 6.0, 7.0, 10.0, 11.0, 14.99, 15.0, 16.0, 25.0, 28.0, 30.0, 50.0):
+            self.assertEqual(
+                _gap_before(t, caps),
+                _gap_before(t, caps, starts=starts),
+                msg=f"_gap_before divergence at t={t}",
+            )
+            self.assertEqual(
+                _gap_after(t, caps),
+                _gap_after(t, caps, starts=starts),
+                msg=f"_gap_after divergence at t={t}",
+            )
+
+    def test_bisect_scales_sublinearly(self) -> None:
+        """5k-caption transcript stays responsive — gap lookup is O(log n).
+
+        Not a strict micro-benchmark (CI jitter will happily inflate
+        timing by 5x on a cold runner). The budget is wide: 5000
+        captions * 1000 lookups should finish well under a second on
+        any reasonable host once the linear scan is gone. A regression
+        that restores the O(n) scan would push this into the minutes.
+        """
+        import time
+
+        caps = [Caption(float(i), float(i) + 0.5, "word") for i in range(5000)]
+        starts = [c.start for c in caps]
+        probes = [float(i * 5) for i in range(1000)]
+        t0 = time.perf_counter()
+        for t in probes:
+            _gap_before(t, caps, starts=starts)
+            _gap_after(t, caps, starts=starts)
+        elapsed = time.perf_counter() - t0
+        self.assertLess(elapsed, 1.0, f"scaling regression — {elapsed:.3f}s")
+
 
 class PropsCancelCooperationTests(unittest.TestCase):
     """H5: ``propose_segments`` honours ``cancel_cb`` at loop heads."""
