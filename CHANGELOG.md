@@ -61,13 +61,20 @@ Every module follows the `core.subtitles` lazy-install pattern — `is_available
 
 Not wired per user preference: `core.diarize` (HuggingFace token / signup) and `core.broll` (Pexels API key / signup). Both remain available as importable modules.
 
+#### pycaps off the GUI thread
+
+- **`workers/pycaps_worker.py`** — new `QThread` that runs `animated_captions.render_composited` off the Qt event loop. The pycaps composite is a full FFmpeg re-encode and can take minutes on long clips; the previous `_apply_pycaps_pass` helper called it directly from the encode-done slot, freezing the entire window for the duration.
+- **`MainController._on_export_done` refactor** — when an entry has an animated style + cached transcript, the slot now kicks `PycapsWorker`, stashes the original out path / entry id in `_pending_pycaps`, and returns. File-swap + export finalisation run from `_on_pycaps_done` / `_on_pycaps_failed`. Shared finalisation lives in `_finish_export_done`. Missing-dep and missing-transcript paths still fall through to the reframed export with a log warning, unchanged.
+- **Lifecycle** — `pycaps_worker` is wired into `has_running_worker`, `shutdown`, and `cancel_active`. User-cancel deletes the partial `.pycaps` sibling file so a half-encoded MP4 never lands next to the final export.
+
 #### Test suite
 
-- **58 → 101 passing** (+ 1 skipped when `auto-editor` is present locally, a correct branch).
+- **58 → 108 passing** (+ 1 skipped when `auto-editor` is present locally, a correct branch).
 - `tests/test_hardening.py` — 11 regression guards pinning every hardening-pass fix.
 - `tests/test_integrations.py` — 33 smoke tests covering every optional module's contract (including `_captions_to_whisper_json` uses `word` key, not `text`).
 - `tests/test_main_window_smoke.py` — MainWindow construction + core signal paths.
 - `tests/test_fading_tab_widget.py` — cross-theme construction + reduced-motion opt-out.
+- `tests/test_pycaps_worker.py` — 7 guards for the worker's cancel / failure contract and the controller's three-way finalisation branch (direct / pycaps-done / pycaps-failed).
 
 ---
 

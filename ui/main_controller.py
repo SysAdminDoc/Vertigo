@@ -59,6 +59,7 @@ from workers.scene_worker import SceneWorker
 from workers.subtitle_worker import SubtitleWorker
 from workers.auto_edit_worker import AutoEditWorker
 from workers.highlights_worker import HighlightsWorker
+from workers.pycaps_worker import PycapsWorker
 from workers.vad_worker import VadWorker
 
 from .batch_queue import QueueEntry, QueueStatus
@@ -91,6 +92,11 @@ class MainController(QObject):
         self.vad_worker: VadWorker | None = None
         self.highlights_worker: HighlightsWorker | None = None
         self.auto_edit_worker: AutoEditWorker | None = None
+        self.pycaps_worker: PycapsWorker | None = None
+        # Context captured when an export kicks off a pycaps pass, so
+        # ``_on_pycaps_done`` can finish the export without the slot
+        # needing to re-derive the original out path / entry id.
+        self._pending_pycaps: dict | None = None
 
         # analysis results (consumed by export and UI refreshers)
         self.track_points: list = []
@@ -148,6 +154,7 @@ class MainController(QObject):
             self.vad_worker,
             self.highlights_worker,
             self.auto_edit_worker,
+            self.pycaps_worker,
         ):
             if w is not None and w.isRunning():
                 return True
@@ -176,6 +183,7 @@ class MainController(QObject):
             self.vad_worker,
             self.highlights_worker,
             self.auto_edit_worker,
+            self.pycaps_worker,
         ):
             if worker is None or not worker.isRunning():
                 continue
@@ -922,19 +930,135 @@ class MainController(QObject):
         w._refresh_overview()
 
     def _on_export_done(self, out: str, entry_id: int | None) -> None:
-        w = self.win
         out_path = Path(out)
 
         # Pycaps post-encode pass: when the entry had an animated
-        # style selected, run pycaps over the just-finished reframed
-        # output with the cached Whisper transcript. pycaps re-encodes
-        # to a sibling file which then replaces the original.
+        # style selected AND the user generated a transcript, kick a
+        # PycapsWorker that re-encodes the just-finished reframed
+        # output onto a sibling file. The file swap + UI finalisation
+        # run from _on_pycaps_done so the full composite pass stays off
+        # the Qt event loop.
         animated_style = (
             self.animated_styles.get(entry_id) if entry_id is not None else None
         )
-        if animated_style and entry_id is not None:
-            out_path = self._apply_pycaps_pass(out_path, entry_id, animated_style)
+        if animated_style and entry_id is not None and self._start_pycaps_pass(
+            out_path, entry_id, animated_style
+        ):
+            return
 
+        self._finish_export_done(out_path, entry_id)
+
+    def _start_pycaps_pass(
+        self,
+        reframed_out: Path,
+        entry_id: int,
+        template: str,
+    ) -> bool:
+        """Kick PycapsWorker for the animated-caption post-pass.
+
+        Returns True when a worker was started (the caller must NOT
+        finalise the export in that case — ``_on_pycaps_done`` or
+        ``_on_pycaps_failed`` will take over). Returns False when the
+        optional dep is missing or there's no transcript to feed it, in
+        which case the caller should finalise the export as normal.
+        """
+        w = self.win
+        from core import animated_captions
+
+        if not animated_captions.is_available():
+            self._append_log(
+                "[warn] pycaps selected but not installed — skipping "
+                "animated-caption pass."
+            )
+            return False
+        captions = self.clip_captions.get(entry_id)
+        if not captions:
+            self._append_log(
+                "[warn] pycaps pass skipped: no transcript cached. "
+                "Generate captions before exporting."
+            )
+            return False
+
+        tmp_out = reframed_out.with_name(
+            f"{reframed_out.stem}.pycaps{reframed_out.suffix}"
+        )
+        self._pending_pycaps = {
+            "reframed_out": reframed_out,
+            "tmp_out": tmp_out,
+            "entry_id": entry_id,
+            "template": template,
+        }
+        self.win._set_export_status(
+            "Rendering animated captions\u2026", tone="accent"
+        )
+        self._append_log(f"[pycaps] template={template}")
+        # Keep cancel enabled so the user can back out of a long pycaps
+        # render; the rest of the export-busy UI state (hidden export
+        # button, disabled preset buttons) stays put through the pass.
+        w._cancel_btn.setEnabled(True)
+
+        worker = PycapsWorker(
+            source_video=reframed_out,
+            out_path=tmp_out,
+            captions=captions,
+            template=template,
+        )
+        worker.finished_ok.connect(self._on_pycaps_done)
+        worker.failed.connect(self._on_pycaps_failed)
+        self.pycaps_worker = worker
+        worker.start()
+        return True
+
+    def _on_pycaps_done(self, tmp_out_str: str) -> None:
+        """Swap the pycaps output into place and finalise the export."""
+        ctx = self._pending_pycaps or {}
+        self._pending_pycaps = None
+        reframed_out: Path = ctx.get("reframed_out") or Path(tmp_out_str)
+        tmp_out = Path(tmp_out_str)
+        entry_id = ctx.get("entry_id")
+
+        final_path = reframed_out
+        try:
+            reframed_out.unlink(missing_ok=True)
+            tmp_out.replace(reframed_out)
+        except Exception as e:
+            self._append_log(
+                f"[pycaps warn] Couldn't swap output ({e}); leaving pycaps "
+                f"copy at {tmp_out}."
+            )
+            final_path = tmp_out
+
+        self._finish_export_done(final_path, entry_id)
+
+    def _on_pycaps_failed(self, msg: str) -> None:
+        """Fall back to the reframed export without animated captions."""
+        ctx = self._pending_pycaps or {}
+        self._pending_pycaps = None
+        reframed_out: Path = ctx.get("reframed_out") or self.win._info.path  # type: ignore[union-attr]
+        tmp_out: Path = ctx.get("tmp_out") or reframed_out
+        entry_id = ctx.get("entry_id")
+
+        # Always scrub the partial pycaps output so the user doesn't see
+        # a truncated sibling file next to their export.
+        try:
+            tmp_out.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        cancelled = msg == "Cancelled."
+        if cancelled:
+            self._append_log("[pycaps] Cancelled — kept reframed export.")
+        else:
+            self._append_log(f"[pycaps error] {msg}")
+            self.win._toast.show_toast(
+                f"Animated captions failed: {msg}. Export kept without them.",
+                kind="warning",
+                duration_ms=5000,
+            )
+        self._finish_export_done(reframed_out, entry_id)
+
+    def _finish_export_done(self, out_path: Path, entry_id: int | None) -> None:
+        w = self.win
         self.last_output_path = out_path
         w._export_progress.setValue(100)
         self.win._set_export_status("Complete", tone="success")
@@ -949,77 +1073,6 @@ class MainController(QObject):
             self._advance_batch()
         else:
             self._reset_export_ui()
-
-    def _apply_pycaps_pass(
-        self,
-        reframed_out: Path,
-        entry_id: int,
-        template: str,
-    ) -> Path:
-        """Run pycaps over a just-finished export so the final file has
-        animated captions burned in.
-
-        Returns the path of the final file — either the pycaps output
-        (which replaces the original in-place) on success, or the
-        original reframed output if pycaps failed / wasn't installed.
-        Failures are surfaced via the log panel + a toast rather than
-        raising, so the user still gets a usable export.
-        """
-        w = self.win
-        from core import animated_captions
-
-        if not animated_captions.is_available():
-            self._append_log(
-                "[warn] pycaps selected but not installed — skipping "
-                "animated-caption pass."
-            )
-            return reframed_out
-        captions = self.clip_captions.get(entry_id)
-        if not captions:
-            self._append_log(
-                "[warn] pycaps pass skipped: no transcript cached. "
-                "Generate captions before exporting."
-            )
-            return reframed_out
-
-        self.win._set_export_status("Rendering animated captions\u2026", tone="accent")
-        self._append_log(f"[pycaps] template={template}")
-
-        tmp_out = reframed_out.with_name(
-            f"{reframed_out.stem}.pycaps{reframed_out.suffix}"
-        )
-        try:
-            animated_captions.render_composited(
-                reframed_out,
-                tmp_out,
-                captions,
-                template=template,
-            )
-        except Exception as e:
-            self._append_log(f"[pycaps error] {type(e).__name__}: {e}")
-            try:
-                tmp_out.unlink(missing_ok=True)
-            except Exception:
-                pass
-            w._toast.show_toast(
-                f"Animated captions failed: {e}. Export kept without them.",
-                kind="warning",
-                duration_ms=5000,
-            )
-            return reframed_out
-
-        # Swap the new file into the original name so downstream
-        # references (open-folder, batch accounting) keep working.
-        try:
-            reframed_out.unlink(missing_ok=True)
-            tmp_out.replace(reframed_out)
-        except Exception as e:
-            self._append_log(
-                f"[pycaps warn] Couldn't swap output ({e}); leaving pycaps "
-                f"copy at {tmp_out}."
-            )
-            return tmp_out
-        return reframed_out
 
     def _on_export_fail(self, msg: str, entry_id: int | None) -> None:
         w = self.win
@@ -1044,7 +1097,8 @@ class MainController(QObject):
         has_vad = bool(self.vad_worker and self.vad_worker.isRunning())
         has_hl = bool(self.highlights_worker and self.highlights_worker.isRunning())
         has_ae = bool(self.auto_edit_worker and self.auto_edit_worker.isRunning())
-        if not (has_encode or has_detect or has_subs or has_vad or has_hl or has_ae):
+        has_pc = bool(self.pycaps_worker and self.pycaps_worker.isRunning())
+        if not (has_encode or has_detect or has_subs or has_vad or has_hl or has_ae or has_pc):
             return
         self.batch_running = False
         w._cancel_btn.setEnabled(False)
@@ -1061,6 +1115,8 @@ class MainController(QObject):
             self.highlights_worker.cancel()
         if has_ae and self.auto_edit_worker:
             self.auto_edit_worker.cancel()
+        if has_pc and self.pycaps_worker:
+            self.pycaps_worker.cancel()
         w._refresh_overview()
 
     def _reset_export_ui(self) -> None:
