@@ -293,6 +293,17 @@ class VideoPlayer(QWidget):
         self.highlights_btn.setAccessibleName("Find highlight moments")
         self.highlights_btn.setEnabled(False)
 
+        self.trim_silences_btn = QPushButton("Trim silences")
+        self.trim_silences_btn.setObjectName("ghostBtn")
+        self.trim_silences_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.trim_silences_btn.setToolTip(
+            "Run auto-editor over the clip. Pick from the longest "
+            "speech-contiguous sections to drop the trim on one of "
+            "them. Requires the 'auto-editor' CLI on PATH."
+        )
+        self.trim_silences_btn.setAccessibleName("Trim to a speech section")
+        self.trim_silences_btn.setEnabled(False)
+
         self._trim_hint = QLabel("Load a clip to scrub, trim in and out points, and snap to scene cuts.")
         self._trim_hint.setObjectName("valueMuted")
         self._trim_hint.setWordWrap(True)
@@ -313,6 +324,7 @@ class VideoPlayer(QWidget):
         trim_row.setSpacing(10)
         trim_row.addWidget(self._trim_label, 1)
         trim_row.addWidget(self.highlights_btn)
+        trim_row.addWidget(self.trim_silences_btn)
         trim_row.addWidget(self.tighten_btn)
 
         lay = QVBoxLayout(self)
@@ -336,6 +348,7 @@ class VideoPlayer(QWidget):
         self._play_btn.setAccessibleName("Play preview")
         self.tighten_btn.setEnabled(True)
         self.highlights_btn.setEnabled(True)
+        self.trim_silences_btn.setEnabled(True)
         self._time.setProperty("tone", "accent")
         self._time.style().unpolish(self._time)
         self._time.style().polish(self._time)
@@ -374,6 +387,7 @@ class VideoPlayer(QWidget):
         self._play_btn.setAccessibleName("Play preview")
         self.tighten_btn.setEnabled(False)
         self.highlights_btn.setEnabled(False)
+        self.trim_silences_btn.setEnabled(False)
         self._time.setText("0:00 / 0:00")
         self._time.setProperty("tone", None)
         self._time.style().unpolish(self._time)

@@ -57,6 +57,7 @@ from workers.detect_worker import DetectWorker
 from workers.encode_worker import EncodeWorker
 from workers.scene_worker import SceneWorker
 from workers.subtitle_worker import SubtitleWorker
+from workers.auto_edit_worker import AutoEditWorker
 from workers.highlights_worker import HighlightsWorker
 from workers.vad_worker import VadWorker
 
@@ -89,6 +90,7 @@ class MainController(QObject):
         self.scene_worker: SceneWorker | None = None
         self.vad_worker: VadWorker | None = None
         self.highlights_worker: HighlightsWorker | None = None
+        self.auto_edit_worker: AutoEditWorker | None = None
 
         # analysis results (consumed by export and UI refreshers)
         self.track_points: list = []
@@ -128,6 +130,7 @@ class MainController(QObject):
         w._player.trim_changed.connect(w._on_trim_changed)
         w._player.tighten_btn.clicked.connect(self.run_tighten_silences)
         w._player.highlights_btn.clicked.connect(self.run_find_highlights)
+        w._player.trim_silences_btn.clicked.connect(self.run_trim_silences)
         w._export_thumbs_btn.clicked.connect(self.export_thumbnails)
 
     # --------------------------------------------------------------- status
@@ -138,6 +141,7 @@ class MainController(QObject):
             self.subtitle_worker,
             self.vad_worker,
             self.highlights_worker,
+            self.auto_edit_worker,
         ):
             if w is not None and w.isRunning():
                 return True
@@ -165,6 +169,7 @@ class MainController(QObject):
             self.scene_worker,
             self.vad_worker,
             self.highlights_worker,
+            self.auto_edit_worker,
         ):
             if worker is None or not worker.isRunning():
                 continue
@@ -456,6 +461,83 @@ class MainController(QObject):
         w._trim_high = end
         w._refresh_platform_notice()
         w._refresh_overview()
+
+    # --------------------------------------------------------------- trim silences
+    def run_trim_silences(self) -> None:
+        """Kick auto-editor and let the user pick a speech-contiguous
+        span to trim to. The output set is ranked by duration so the
+        longest continuous speech section shows up first.
+        """
+        from core import auto_edit
+
+        w = self.win
+        if not w._info:
+            w._toast.show_toast("Load a clip first.", kind="warning")
+            return
+        if self.auto_edit_worker and self.auto_edit_worker.isRunning():
+            return
+        if not auto_edit.is_available():
+            w._toast.show_toast(
+                f"auto-editor not found on PATH. Install with: "
+                f"{auto_edit.install_hint()}",
+                kind="warning",
+                duration_ms=5000,
+            )
+            return
+
+        w._toast.show_toast("Scanning for silences\u2026", kind="info")
+        w._player.trim_silences_btn.setEnabled(False)
+
+        worker = AutoEditWorker(video_path=w._info.path)
+        worker.finished_ok.connect(self._on_trim_silences_ready)
+        worker.failed.connect(self._on_trim_silences_failed)
+        self.auto_edit_worker = worker
+        worker.start()
+
+    def _on_trim_silences_ready(self, spans: list) -> None:
+        w = self.win
+        w._player.trim_silences_btn.setEnabled(True)
+        if not spans:
+            w._toast.show_toast(
+                "Nothing to trim — no speech sections detected.",
+                kind="warning",
+            )
+            return
+        # Sort by duration descending; show the top 5 so the menu
+        # stays legible on small displays. Ties are broken by the
+        # earlier start time so the clip's opening beat wins.
+        spans_ranked = sorted(
+            spans, key=lambda s: (-s.duration, s.start)
+        )[:5]
+        self._present_trim_silence_menu(spans_ranked)
+
+    def _on_trim_silences_failed(self, msg: str) -> None:
+        w = self.win
+        w._player.trim_silences_btn.setEnabled(True)
+        if msg == "Cancelled.":
+            return
+        w._toast.show_toast(msg, kind="warning")
+
+    def _present_trim_silence_menu(self, spans: list) -> None:
+        w = self.win
+        menu = QMenu(w)
+        menu.setAccessibleName("Speech sections")
+        for span in spans:
+            label = self._format_silence_label(span)
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, s=float(span.start), e=float(span.end):
+                    self._apply_highlight_trim(s, e)
+            )
+        btn = w._player.trim_silences_btn
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _format_silence_label(self, span) -> str:
+        return (
+            f"{_fmt_duration(span.start)} \u2013 "
+            f"{_fmt_duration(span.end)}"
+            f"   \u00b7   {_fmt_duration(span.duration)} of speech"
+        )
 
     # --------------------------------------------------------------- detection
     def run_detect(self) -> None:
@@ -836,7 +918,8 @@ class MainController(QObject):
         has_subs = bool(self.subtitle_worker and self.subtitle_worker.isRunning())
         has_vad = bool(self.vad_worker and self.vad_worker.isRunning())
         has_hl = bool(self.highlights_worker and self.highlights_worker.isRunning())
-        if not has_encode and not has_detect and not has_subs and not has_vad and not has_hl:
+        has_ae = bool(self.auto_edit_worker and self.auto_edit_worker.isRunning())
+        if not (has_encode or has_detect or has_subs or has_vad or has_hl or has_ae):
             return
         self.batch_running = False
         w._cancel_btn.setEnabled(False)
@@ -851,6 +934,8 @@ class MainController(QObject):
             self.vad_worker.cancel()
         if has_hl and self.highlights_worker:
             self.highlights_worker.cancel()
+        if has_ae and self.auto_edit_worker:
+            self.auto_edit_worker.cancel()
         w._refresh_overview()
 
     def _reset_export_ui(self) -> None:
