@@ -57,6 +57,7 @@ from workers.detect_worker import DetectWorker
 from workers.encode_worker import EncodeWorker
 from workers.scene_worker import SceneWorker
 from workers.subtitle_worker import SubtitleWorker
+from workers.vad_worker import VadWorker
 
 from .batch_queue import QueueEntry, QueueStatus
 
@@ -85,6 +86,7 @@ class MainController(QObject):
         self.encode_worker: EncodeWorker | None = None
         self.subtitle_worker: SubtitleWorker | None = None
         self.scene_worker: SceneWorker | None = None
+        self.vad_worker: VadWorker | None = None
 
         # analysis results (consumed by export and UI refreshers)
         self.track_points: list = []
@@ -122,10 +124,11 @@ class MainController(QObject):
         w._player.canvas.viewport_dragged.connect(w._on_manual_drag)
         w._player.position_changed.connect(w._sync_track_pos)
         w._player.trim_changed.connect(w._on_trim_changed)
+        w._player.tighten_btn.clicked.connect(self.run_tighten_silences)
 
     # --------------------------------------------------------------- status
     def has_running_worker(self) -> bool:
-        for w in (self.detect_worker, self.encode_worker, self.subtitle_worker):
+        for w in (self.detect_worker, self.encode_worker, self.subtitle_worker, self.vad_worker):
             if w is not None and w.isRunning():
                 return True
         return False
@@ -150,6 +153,7 @@ class MainController(QObject):
             self.detect_worker,
             self.subtitle_worker,
             self.scene_worker,
+            self.vad_worker,
         ):
             if worker is None or not worker.isRunning():
                 continue
@@ -254,6 +258,65 @@ class MainController(QObject):
         w._subs_panel.set_status(f"Transcription failed: {msg}", tone="warning")
         w._toast.show_toast(msg, kind="error")
         w._refresh_overview()
+
+    # --------------------------------------------------------------- tighten
+    def run_tighten_silences(self) -> None:
+        """Run Silero VAD and pull the trim handles to the outer
+        speech edges. Surfaces install/setup problems via toast so
+        users know why the button did nothing.
+        """
+        from core import vad
+
+        w = self.win
+        if not w._info:
+            w._toast.show_toast("Load a clip first.", kind="warning")
+            return
+        if self.vad_worker and self.vad_worker.isRunning():
+            return
+        if not vad.is_available():
+            w._toast.show_toast(
+                "Install silero-vad to enable speech tightening:"
+                "  pip install silero-vad",
+                kind="warning",
+                duration_ms=4500,
+            )
+            return
+
+        w._toast.show_toast("Analysing speech\u2026", kind="info")
+        w._player.tighten_btn.setEnabled(False)
+
+        worker = VadWorker(
+            video_path=w._info.path,
+            duration_sec=w._info.duration,
+        )
+        worker.trim_ready.connect(self._on_tighten_ready)
+        worker.failed.connect(self._on_tighten_failed)
+        self.vad_worker = worker
+        worker.start()
+
+    def _on_tighten_ready(self, low: float, high: float, coverage: float) -> None:
+        w = self.win
+        w._player.set_trim_range(low, high)
+        # _on_trim_changed fires from the scrubber already; we still
+        # update window trim state directly so plan / refresh helpers
+        # see the new values immediately.
+        w._trim_low = low
+        w._trim_high = high
+        w._refresh_platform_notice()
+        w._refresh_overview()
+        pct = int(round(coverage * 100))
+        w._toast.show_toast(
+            f"Trimmed to speech \u00b7 {pct}% of the clip is voice",
+            kind="success",
+        )
+        w._player.tighten_btn.setEnabled(True)
+
+    def _on_tighten_failed(self, msg: str) -> None:
+        w = self.win
+        w._player.tighten_btn.setEnabled(True)
+        if msg == "Cancelled.":
+            return
+        w._toast.show_toast(msg, kind="warning")
 
     # --------------------------------------------------------------- detection
     def run_detect(self) -> None:
@@ -632,7 +695,8 @@ class MainController(QObject):
         has_encode = bool(self.encode_worker and self.encode_worker.isRunning())
         has_detect = bool(self.detect_worker and self.detect_worker.isRunning())
         has_subs = bool(self.subtitle_worker and self.subtitle_worker.isRunning())
-        if not has_encode and not has_detect and not has_subs:
+        has_vad = bool(self.vad_worker and self.vad_worker.isRunning())
+        if not has_encode and not has_detect and not has_subs and not has_vad:
             return
         self.batch_running = False
         w._cancel_btn.setEnabled(False)
@@ -643,6 +707,8 @@ class MainController(QObject):
             self.detect_worker.cancel()
         if has_subs and self.subtitle_worker:
             self.subtitle_worker.cancel()
+        if has_vad and self.vad_worker:
+            self.vad_worker.cancel()
         w._refresh_overview()
 
     def _reset_export_ui(self) -> None:

@@ -272,6 +272,16 @@ class VideoPlayer(QWidget):
         self._trim_label = QLabel("Trim: 0:00 \u2013 0:00")
         self._trim_label.setObjectName("subtitle")
 
+        self.tighten_btn = QPushButton("Tighten to speech")
+        self.tighten_btn.setObjectName("ghostBtn")
+        self.tighten_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tighten_btn.setToolTip(
+            "Runs voice-activity detection and pulls the trim handles "
+            "to the outer speech edges. Silero VAD (optional)."
+        )
+        self.tighten_btn.setAccessibleName("Tighten trim to detected speech")
+        self.tighten_btn.setEnabled(False)
+
         self._trim_hint = QLabel("Load a clip to scrub, trim in and out points, and snap to scene cuts.")
         self._trim_hint.setObjectName("valueMuted")
         self._trim_hint.setWordWrap(True)
@@ -288,12 +298,17 @@ class VideoPlayer(QWidget):
         transport.addWidget(self._scrubber, 1)
         transport.addWidget(self._time)
 
+        trim_row = QHBoxLayout()
+        trim_row.setSpacing(10)
+        trim_row.addWidget(self._trim_label, 1)
+        trim_row.addWidget(self.tighten_btn)
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
         lay.addWidget(self.canvas, 1)
         lay.addLayout(transport)
-        lay.addWidget(self._trim_label)
+        lay.addLayout(trim_row)
         lay.addWidget(self._trim_hint)
 
     # public API -------------------------------------------------------
@@ -307,6 +322,7 @@ class VideoPlayer(QWidget):
         self._play_btn.setText("\u25b6")
         self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
+        self.tighten_btn.setEnabled(True)
         self._time.setProperty("tone", "accent")
         self._time.style().unpolish(self._time)
         self._time.style().polish(self._time)
@@ -343,6 +359,7 @@ class VideoPlayer(QWidget):
         self._play_btn.setEnabled(False)
         self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
+        self.tighten_btn.setEnabled(False)
         self._time.setText("0:00 / 0:00")
         self._time.setProperty("tone", None)
         self._time.style().unpolish(self._time)
@@ -386,6 +403,11 @@ class VideoPlayer(QWidget):
 
     def trim_range(self) -> tuple[float, float]:
         return self._scrubber.low(), self._scrubber.high()
+
+    def set_trim_range(self, low: float, high: float) -> None:
+        """Programmatic trim-handle update — used by VAD / auto-edit
+        workers to drop the handles onto the detected keep span."""
+        self._scrubber.set_range(low, high)
 
     def refresh_theme(self) -> None:
         self.canvas.update()

@@ -78,6 +78,27 @@ class RangeSlider(QWidget):
     def duration(self) -> float:
         return self._duration
 
+    def set_range(self, low: float, high: float) -> None:
+        """Programmatic trim update — used by the VAD worker to drop
+        the handles onto the detected speech edges.
+
+        Clamps to ``[0, duration]`` and ensures ``low <= high``. Emits
+        ``range_changed`` so the main window's trim-label + plan
+        recompute in the same way they do on a drag.
+        """
+        if self._duration <= 0:
+            return
+        lo = max(0.0, min(float(low), self._duration))
+        hi = max(lo, min(float(high), self._duration))
+        # Only emit when something actually moves so the setter is
+        # idempotent for callers that want to reset to the same value.
+        if lo == self._low and hi == self._high:
+            return
+        self._low = lo
+        self._high = hi
+        self.update()
+        self.range_changed.emit(self._low, self._high)
+
     # -------------------------------------------------- painting
     def paintEvent(self, event) -> None:
         p = QPainter(self)
