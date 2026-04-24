@@ -6,7 +6,7 @@
 
 **Vertical video studio for short-form creators.**
 
-![version](https://img.shields.io/badge/version-0.12.1-cba6f7?style=for-the-badge)
+![version](https://img.shields.io/badge/version-0.12.2-cba6f7?style=for-the-badge)
 ![license](https://img.shields.io/badge/license-MIT-a6e3a1?style=for-the-badge)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-89b4fa?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.10%2B-f9e2af?style=for-the-badge)
@@ -28,7 +28,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Platform presets** — YouTube Shorts, TikTok, Instagram Reels, Square (1:1). One click switches output geometry and encoder target bitrate.
 - **Batch queue** — drop many clips at once, preview any one, then **Export All** to a folder. Per-item status indicator.
 - **Trim timeline** — dual-thumb in/out range slider directly on the preview. Exports respect the trim window via FFmpeg `-ss` / `-t`.
-- **Four one-click trim helpers** — *Suggest segments* (TextTiling-ranked 30-90 s candidates on clips > 10 min, reads the cached transcript — **new in v0.12.0**), *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
+- **Four one-click trim helpers** — *Suggest segments* (TextTiling-ranked 30-90 s candidates on clips > 10 min; **requires AI captions to be generated first** so the segmenter has a transcript to work with — **new in v0.12.0**), *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
 - **Export thumbnails** — one-click save of six representative PNG cover frames (Katna-ranked when installed, evenly-spaced cv2 frames otherwise).
 - **Adjustments panel** — live brightness / contrast / saturation sliders; applied via FFmpeg `eq=` filter appended to the reframe chain.
 - **Scene detection** — PySceneDetect (with a histogram-delta fallback) segments the timeline to stabilize Smart Track.
@@ -48,6 +48,11 @@ Each module under `core/` below is usable on its own and ships with a clean fall
 pip install -r requirements-optional.txt   # everything, or
 pip install silero-vad                     # cherry-pick
 ```
+
+**Licensing note.** Vertigo itself is MIT. The opt-in deps carry their own licenses (see `requirements-optional.txt` for per-package detail). Two surfaces deserve calling out:
+
+- **`boxmot` is AGPL-3.0.** Desktop builds are fine — Vertigo never bundles `boxmot`, so installing it on your own machine is your own decision. If you redistribute Vertigo as a hosted / SaaS product alongside `boxmot`, AGPL-3.0 network copyleft kicks in.
+- **`pyannote.audio` model weights** are often CC-BY-NC-4.0 (non-commercial) on HuggingFace. The Python code is MIT, but the default diarization checkpoint requires you to accept the HF model card's terms before use.
 
 | Module | What it adds | Heavy dep | Fallback when missing |
 |---|---|---|---|
@@ -91,37 +96,67 @@ sudo apt install ffmpeg
 ## Architecture
 
 ```
-vertigo.py                entry + dependency bootstrap
+vertigo.py                entry + dependency bootstrap + PyInstaller freeze-support
 vertigo.spec              PyInstaller build spec (single-file, per-OS icon)
 .github/workflows/build.yml  Multi-OS CI + GitHub Release upload
 core/
+  _lazy.py                shared pip-install helper with frozen-build guard + threading.Lock
+  caption_types.py        Caption + Word dataclasses (lifted from subtitles for clean imports)
   probe.py                ffprobe wrapper (VideoInfo dataclass)
   presets.py              platform output presets (Shorts/TikTok/Reels/Square)
   detect.py               MediaPipe face tracker (Haar fallback)
+  cameraman.py            SmoothedCameraman + SpeakerTracker (Smart Track smoothing)
   scenes.py               scene detection (PySceneDetect + histogram fallback)
+  cluster_track.py        RetargetVid temporal-persistence filter (pure numpy)
   encoders.py             hardware encoder detection (NVENC/QSV/AMF/VT + CPU)
-  subtitles.py            faster-whisper wrapper (lazy install) + SRT writer
+  subtitles.py            faster-whisper wrapper (lazy install) + SRT/ASS writers + karaoke
+  caption_styles.py       CaptionPreset dataclass + six bundled looks + style_for_height
+  caption_layout.py       face-aware caption alignment heuristic ({\an8} overrides)
+  face_samples.py         face sampler used by caption_layout (2 fps MediaPipe)
   overlays.py             TextOverlay dataclass + drawtext filter chain
   reframe.py              FFmpeg filter graph per mode + Adjustments dataclass
   encode.py               FFmpeg subprocess + progress parsing + trim + burn-in
+  preflight.py            pre-export sanity checks (codec, duration, free disk)
+  dryrun.py               plan-only report (TRACK / LETTERBOX / CENTER strategy)
+  hook_score.py           0-100 first-3-second engagement score (no torch)
+  segment_proposals.py    T3b — local TextTiling segmenter + silence-gap + length-fit ranker
+  animated_captions.py    pycaps post-encode composite (opt-in, Apache-2.0)
+  auto_edit.py            auto-editor CLI interop for silence-cut planning
+  vad.py                  Silero VAD (opt-in, ONNX, no PyTorch)
+  tracker_boxmot.py       BoT-SORT / ByteTrack / DeepOCSORT (opt-in, AGPL-3.0)
+  highlights.py           Lighthouse moment retrieval + sliding-window fallback
+  diarize.py              pyannote speaker diarization (opt-in, HF token required)
+  broll.py                transcript -> keywords -> Pexels -> CLIP b-roll planner
+  keyframes.py            Katna-ranked thumbnails (opt-in) + cv2 fallback
 ui/
   theme.py                semantic theme tokens + QSS stylesheet generation
+  tokens.py               palette / typography tokens consumed by theme.py
   titlebar.py             frameless draggable titlebar + theme picker + brand mark
   assets.py               bundle-aware asset resolver (source + PyInstaller)
-  widgets.py              GlassPanel, ModeCard, Toast
+  widgets.py              GlassPanel, ModeCard, Toast, FadingTabWidget
+  mode_icons.py           painted ReframeMode card icons
   file_drop.py            multi-file drag-drop import zone
-  range_slider.py         dual-thumb trim slider + playhead marker
-  video_player.py         QMediaPlayer preview + crop-viewport overlay + trim
-  batch_queue.py          queue panel with per-item status
+  file_dialogs.py         open/save dialog helpers with preset memory
+  range_slider.py         dual-thumb trim slider + playhead + shot-boundary ticks
+  video_player.py         QMediaPlayer preview + crop-viewport overlay + trim row buttons
+  batch_queue.py          queue panel with per-item status + entry_removed signal
   adjustments_panel.py    brightness / contrast / saturation sliders
   output_panel.py         encoder / quality / speed controls
-  subtitles_panel.py      AI caption generation + burn-in toggle
+  subtitles_panel.py      AI caption generation + burn-in toggle + animated-style picker
   overlays_panel.py       text-overlay editor (titles / lower-thirds)
+  panels.py               shared panel-builder helpers
   main_window.py          composition + wiring + batch driver
+  main_controller.py      worker orchestration + export finaliser + segments gate
 workers/
   detect_worker.py        QThread: runs FaceTracker
-  encode_worker.py        QThread: runs encode.run()
+  encode_worker.py        QThread: runs encode.run() + partial-output unlink on cancel
   subtitle_worker.py      QThread: runs faster-whisper transcription
+  scene_worker.py         QThread: background scene detection on clip load
+  vad_worker.py           QThread: runs Silero VAD for "tighten to speech"
+  highlights_worker.py    QThread: runs core.highlights.score_spans
+  auto_edit_worker.py     QThread: runs auto-editor CLI for "trim silences"
+  pycaps_worker.py        QThread: runs core.animated_captions post-encode composite
+  segment_proposals_worker.py  QThread: runs core.segment_proposals.propose_segments
 assets/
   icon.svg / icon.png / icon.ico + size variants (16/32/48/128/256/512)
   wordmark.svg           typography-focused brand wordmark

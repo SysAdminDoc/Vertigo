@@ -2,6 +2,20 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.12.2] - 2026-04-24
+
+### Postflight security + review findings
+
+Factory-loop postflight pass on top of v0.12.1 — an adversarial security audit and a release-candidate review turned up two real fixes and a pile of documentation drift. No new features.
+
+- **`subtitles=` filter-path injection hole closed.** `core.encode._subtitles_filter` previously escaped only the Windows drive colon (`C:/foo` → `C\:/foo`). A caption file whose path held a second colon — trivial on POSIX timestamped paths or adversarial filenames — slipped the inner colon through libavfilter's filter-graph parser, which then split the `subtitles=...` argument at that colon and interpreted the tail as additional filter options. Escaping every colon as `\:` closes the hole. Added `tests/test_subtitles_filter_escape.py` to pin the fix.
+- **Partial encode output cleaned up on cancel / FFmpeg non-zero exit.** `workers/encode_worker.py::_unlink_partial` now scrubs `self._job.out_path` in all three failure branches (cancel, non-zero rc, exception). Matches the pycaps-swap hygiene we already had and stops half-written multi-GB orphans from piling up next to real exports.
+- **README architecture tree rebuilt.** The `## Architecture` block was still listing the v0.10-era layout — no `core/_lazy.py`, no `core/caption_types.py`, no `segment_proposals`, no `pycaps_worker`, no `highlights_worker`, no `main_controller`. Swept through and matched current tree.
+- **README "Suggest segments" feature bullet** now explicitly calls out that AI captions must be generated first (matching the in-app tooltip).
+- **`requirements-optional.txt` + README licensing section** annotate every opt-in dep with its license. Calls out `boxmot>=11` (AGPL-3.0) and `pyannote.audio` HuggingFace model weights (often CC-BY-NC-4.0) so downstream packagers — SaaS builds especially — know where they stand.
+- **Tightened `test_pycaps_failed_without_usable_output_routes_to_failure`** to actually assert the status pill reads "Export failed" rather than just that `last_output_path` wasn't corrupted to `Path('.')`. Name now matches the behaviour it pins.
+- **Test suite**: 139 → 144 passing (+5 from the new filter-escape regression class).
+
 ## [0.12.1] - 2026-04-24
 
 ### Audit-cycle hardening — pycaps + worker lifecycle + segment cancel
