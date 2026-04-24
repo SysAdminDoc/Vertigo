@@ -148,8 +148,8 @@ if sys.platform == "darwin":
         icon=icon_file,
         bundle_identifier="com.sysadmindoc.vertigo",
         info_plist={
-            "CFBundleShortVersionString": "0.12.2",
-            "CFBundleVersion": "0.12.2",
+            "CFBundleShortVersionString": "0.12.3",
+            "CFBundleVersion": "0.12.3",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },

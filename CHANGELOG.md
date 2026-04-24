@@ -4,6 +4,8 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-04-24
+
 ### Iter 1 — polish + perf (Tier 8)
 
 Factory-loop iteration advancing the "Next up" punch list from the v0.12.2 continuation brief. No new features; every task is visible only in the form of code that no longer scans, leaks, or drops warnings.

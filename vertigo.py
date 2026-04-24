@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vertigo v0.12.2 — vertical video studio for short-form creators.
+"""Vertigo v0.12.3 — vertical video studio for short-form creators.
 
 From the Latin *vertere*, "to turn." Turns raw footage of any shape into
 polished 9:16 for YouTube Shorts, TikTok, and Instagram Reels.
@@ -27,7 +27,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-__version__ = "0.12.2"
+__version__ = "0.12.3"
 APP_NAME = "Vertigo"
 
 _REQUIRED = [
