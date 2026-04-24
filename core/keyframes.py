@@ -20,8 +20,6 @@ when present.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 
@@ -38,7 +36,8 @@ def is_available() -> bool:
 def ensure_installed() -> bool:
     if is_available():
         return True
-    if not _try_pip_install("Katna>=0.9.2"):
+    from ._lazy import pip_install
+    if not pip_install("Katna>=0.9.2"):
         return False
     return is_available()
 
@@ -153,18 +152,3 @@ def save_thumbnails(path: Path, out_dir: Path, *, n: int = 6, prefix: str = "thu
     return written
 
 
-# ---------------------------------------------------------------- helpers
-
-def _try_pip_install(spec: str) -> bool:
-    bases = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--disable-pip-version-check", spec],
-    ]
-    for cmd in bases:
-        try:
-            if subprocess.call(cmd) == 0:
-                return True
-        except Exception:
-            continue
-    return False

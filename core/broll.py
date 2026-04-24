@@ -25,8 +25,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -393,7 +391,8 @@ def plan_broll_inserts(
 def ensure_pypexels_installed() -> bool:
     if _pypexels_available():
         return True
-    if not _try_pip_install("pypexels>=1.0.2"):
+    from ._lazy import pip_install
+    if not pip_install("pypexels>=1.0.2"):
         return False
     return _pypexels_available()
 
@@ -409,7 +408,8 @@ def _pypexels_available() -> bool:
 def ensure_keybert_installed() -> bool:
     if is_keybert_available():
         return True
-    if not _try_pip_install("keybert>=0.8"):
+    from ._lazy import pip_install
+    if not pip_install("keybert>=0.8"):
         return False
     return is_keybert_available()
 
@@ -417,21 +417,7 @@ def ensure_keybert_installed() -> bool:
 def ensure_open_clip_installed() -> bool:
     if is_clip_available():
         return True
-    if not _try_pip_install("open_clip_torch>=2.26"):
+    from ._lazy import pip_install
+    if not pip_install("open_clip_torch>=2.26"):
         return False
     return is_clip_available()
-
-
-def _try_pip_install(spec: str) -> bool:
-    bases = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--disable-pip-version-check", spec],
-    ]
-    for cmd in bases:
-        try:
-            if subprocess.call(cmd) == 0:
-                return True
-        except Exception:
-            continue
-    return False

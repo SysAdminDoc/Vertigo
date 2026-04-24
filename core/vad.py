@@ -62,7 +62,8 @@ def ensure_installed() -> bool:
     """Lazy pip-install of silero-vad; matches core.subtitles pattern."""
     if is_available():
         return True
-    if not _try_pip_install("silero-vad>=5.1"):
+    from ._lazy import pip_install
+    if not pip_install("silero-vad>=5.1"):
         return False
     return is_available()
 
@@ -195,20 +196,6 @@ def _decode_pcm_f32(raw: bytes) -> list[float]:
 
 
 # ---------------------------------------------------------------- helpers
-
-def _try_pip_install(spec: str) -> bool:
-    bases = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--disable-pip-version-check", spec],
-    ]
-    for cmd in bases:
-        try:
-            if subprocess.call(cmd) == 0:
-                return True
-        except Exception:
-            continue
-    return False
 
 
 def _no_window_flags() -> int:

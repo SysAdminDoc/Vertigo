@@ -12,8 +12,6 @@ Output format is chosen by the active caption preset:
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,28 +39,22 @@ class Caption:
     words: tuple[Word, ...] = field(default_factory=tuple)
 
 
-def ensure_installed() -> bool:
-    """Return True if faster-whisper is importable. Attempts lazy install."""
-    try:
-        import faster_whisper  # noqa: F401
-        return True
-    except ImportError:
-        pass
-    if not _try_pip_install("faster-whisper>=1.0.3"):
-        return False
-    try:
-        import faster_whisper  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
 def is_installed() -> bool:
     try:
         import faster_whisper  # noqa: F401
         return True
     except ImportError:
         return False
+
+
+def ensure_installed() -> bool:
+    """Return True if faster-whisper is importable. Attempts lazy install."""
+    if is_installed():
+        return True
+    from ._lazy import pip_install
+    if not pip_install("faster-whisper>=1.0.3"):
+        return False
+    return is_installed()
 
 
 def transcribe(
@@ -457,21 +449,6 @@ def _ass_header(style: dict, play_res_x: int, play_res_y: int) -> str:
 
 def _ass_dialogue(start: float, end: float, body: str) -> str:
     return f"Dialogue: 0,{_fmt_ass(start)},{_fmt_ass(end)},Default,,0,0,0,,{body}"
-
-
-def _try_pip_install(spec: str) -> bool:
-    bases = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--disable-pip-version-check", spec],
-    ]
-    for cmd in bases:
-        try:
-            if subprocess.call(cmd) == 0:
-                return True
-        except Exception:
-            continue
-    return False
 
 
 # ---------------------------------------------------------- legacy aliases

@@ -60,7 +60,8 @@ def ensure_installed() -> bool:
     # auto-install it silently because the first run fetches ~1 GB of
     # model weights. Callers should route the user through a "download
     # highlight model?" confirmation before invoking this.
-    if not _try_pip_install("lighthouse-ml>=0.4"):
+    from ._lazy import pip_install
+    if not pip_install("lighthouse-ml>=0.4"):
         return False
     return is_available()
 
@@ -247,20 +248,6 @@ def _overlaps(a: Highlight, b: Highlight) -> bool:
 
 
 # ---------------------------------------------------------------- helpers
-
-def _try_pip_install(spec: str) -> bool:
-    bases = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--disable-pip-version-check", spec],
-    ]
-    for cmd in bases:
-        try:
-            if subprocess.call(cmd) == 0:
-                return True
-        except Exception:
-            continue
-    return False
 
 
 def _no_window_flags() -> int:

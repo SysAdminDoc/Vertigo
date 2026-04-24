@@ -21,8 +21,6 @@ as a clear error message rather than a silent failure.
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,7 +49,8 @@ def is_available() -> bool:
 def ensure_installed() -> bool:
     if is_available():
         return True
-    if not _try_pip_install("pyannote.audio>=3.3"):
+    from ._lazy import pip_install
+    if not pip_install("pyannote.audio>=3.3"):
         return False
     return is_available()
 
@@ -158,18 +157,3 @@ def align_to_faces(
     return lookup
 
 
-# ---------------------------------------------------------------- helpers
-
-def _try_pip_install(spec: str) -> bool:
-    bases = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--user", "--disable-pip-version-check", spec],
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--disable-pip-version-check", spec],
-    ]
-    for cmd in bases:
-        try:
-            if subprocess.call(cmd) == 0:
-                return True
-        except Exception:
-            continue
-    return False
