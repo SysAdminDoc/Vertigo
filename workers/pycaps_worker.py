@@ -24,6 +24,8 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from . import WORKER_CANCELLED_MSG
+
 
 class PycapsWorker(QThread):
     finished_ok = pyqtSignal(str)
@@ -52,7 +54,7 @@ class PycapsWorker(QThread):
             from core import animated_captions
 
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             animated_captions.render_composited(
                 self._source,
@@ -70,11 +72,11 @@ class PycapsWorker(QThread):
                     self._out.unlink(missing_ok=True)
                 except Exception:
                     pass
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             self.finished_ok.emit(str(self._out))
         except Exception as e:
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             else:
                 self.failed.emit(f"{type(e).__name__}: {e}")

@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from . import WORKER_CANCELLED_MSG
+
 
 class AutoEditWorker(QThread):
     # finished_ok(list[KeepSpan]) — empty list is a valid "nothing kept".
@@ -48,11 +50,11 @@ class AutoEditWorker(QThread):
                 cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             self.finished_ok.emit(list(spans))
         except Exception as e:
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             else:
                 self.failed.emit(f"{type(e).__name__}: {e}")

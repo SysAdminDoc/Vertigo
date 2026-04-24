@@ -11,6 +11,8 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from . import WORKER_CANCELLED_MSG
+
 
 class VadWorker(QThread):
     # trim_ready(low_sec, high_sec, coverage_0_to_1)
@@ -48,7 +50,7 @@ class VadWorker(QThread):
                 cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             if not spans:
                 self.failed.emit(
@@ -67,6 +69,6 @@ class VadWorker(QThread):
             self.trim_ready.emit(trim[0], trim[1], coverage)
         except Exception as e:
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             else:
                 self.failed.emit(f"{type(e).__name__}: {e}")

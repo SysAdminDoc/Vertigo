@@ -6,6 +6,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.encode import EncodeJob, run as encode_run
 
+from . import WORKER_CANCELLED_MSG
+
 
 class EncodeWorker(QThread):
     progress = pyqtSignal(float)   # 0..1
@@ -31,7 +33,7 @@ class EncodeWorker(QThread):
             )
             if self._cancel:
                 self._unlink_partial()
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             elif rc == 0:
                 self.finished_ok.emit(str(self._job.out_path))
             else:

@@ -21,6 +21,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.detect import FaceTracker
 
+from . import WORKER_CANCELLED_MSG
+
 
 class DetectWorker(QThread):
     progress = pyqtSignal(float)      # 0..1
@@ -65,14 +67,14 @@ class DetectWorker(QThread):
                     cancel_cb=lambda: self._cancel,
                 )
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             self.finished_ok.emit(points)
         except Exception as e:
             if self._cancel:
                 # A cancel racing with a tracker-internal exception should
                 # still surface as "Cancelled" so the UI reset path runs.
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             else:
                 self.failed.emit(f"{type(e).__name__}: {e}")
         finally:

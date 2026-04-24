@@ -23,6 +23,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from core.caption_styles import CaptionPreset, default_preset
 from core.subtitles import DEFAULT_MODEL, transcribe_and_write
 
+from . import WORKER_CANCELLED_MSG
+
 
 class SubtitleWorker(QThread):
     progress = pyqtSignal(float)           # 0..1
@@ -86,7 +88,7 @@ class SubtitleWorker(QThread):
                 cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             # Hand the caption list out so the controller can cache it
             # for a post-encode pycaps pass without re-running Whisper.
@@ -94,6 +96,6 @@ class SubtitleWorker(QThread):
             self.finished_ok.emit(str(result.path))
         except Exception as e:
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             else:
                 self.failed.emit(f"{type(e).__name__}: {e}")

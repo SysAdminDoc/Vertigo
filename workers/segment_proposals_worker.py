@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from . import WORKER_CANCELLED_MSG
+
 
 class SegmentProposalsWorker(QThread):
     # finished_ok(list[SegmentProposal]) — may be empty; caller decides UX.
@@ -48,11 +50,11 @@ class SegmentProposalsWorker(QThread):
                 cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             self.finished_ok.emit(list(proposals))
         except Exception as e:
             if self._cancel:
-                self.failed.emit("Cancelled.")
+                self.failed.emit(WORKER_CANCELLED_MSG)
             else:
                 self.failed.emit(f"{type(e).__name__}: {e}")
