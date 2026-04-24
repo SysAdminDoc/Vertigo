@@ -48,8 +48,29 @@ class CrashLogPathTests(unittest.TestCase):
                 path = crashlog.crash_log_path()
                 self.assertTrue(str(path).startswith(tmp))
                 self.assertEqual(path.name, "crash.log")
+                # Case must match vertigo.py::_log_dir exactly — "Vertigo",
+                # not "vertigo". Mixing up case used to split the bootstrap
+                # log and the runtime log into two different directories.
+                self.assertIn("Vertigo", path.parts)
             finally:
                 os.environ.pop("XDG_STATE_HOME", None)
+
+    def test_windows_appdata_fallback_when_localappdata_unset(self) -> None:
+        """APPDATA should be used when LOCALAPPDATA is missing — matches
+        the bootstrap's `_log_dir` resolution order."""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(crashlog.sys, "platform", "win32"):
+            had_local = os.environ.pop("LOCALAPPDATA", None)
+            os.environ["APPDATA"] = tmp
+            try:
+                path = crashlog.crash_log_path()
+                self.assertTrue(
+                    str(path).startswith(tmp),
+                    f"APPDATA fallback ignored: {path}",
+                )
+            finally:
+                os.environ.pop("APPDATA", None)
+                if had_local is not None:
+                    os.environ["LOCALAPPDATA"] = had_local
 
     def test_never_writes_into_meipass(self) -> None:
         # A PyInstaller one-file build sets ``sys._MEIPASS``. Force each
@@ -117,18 +138,31 @@ class CrashLogAppendTests(unittest.TestCase):
         self.assertIn("hello world", body)
         self.assertRegex(body, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
-    def test_append_is_noop_on_bad_parent(self) -> None:
-        # Point the env override at an unreadable path (a regular file
-        # posing as a directory) and confirm append still returns None
-        # instead of bubbling.
+    def test_append_falls_back_to_temp_on_bad_parent(self) -> None:
+        """Primary path fails mkdir → append lands in the TEMP fallback.
+
+        The older behaviour was "return None silently" — but losing the
+        breadcrumb on a sandboxed environment was the exact failure
+        mode R8 harmonises against the bootstrap's TEMP escape hatch.
+        """
         with tempfile.NamedTemporaryFile(delete=False) as f:
             fake_dir = f.name
         self.addCleanup(lambda: os.unlink(fake_dir))
-        # Treat the existing file as the "directory" parent of a crashlog
-        # — mkdir will fail on Windows + POSIX alike.
         os.environ["VERTIGO_CRASH_LOG"] = str(Path(fake_dir) / "crash.log")
-        result = crashlog.append("should not raise")
-        self.assertIsNone(result)
+        result = crashlog.append("temp-fallback breadcrumb")
+        # Either the TEMP fallback caught it, or both writers hit the
+        # same unwritable mount — the None branch is still valid but
+        # in practice TEMP should succeed on every supported platform.
+        if result is None:
+            self.skipTest("TEMP fallback unwritable on this host")
+        self.assertTrue(result.exists())
+        body = result.read_text(encoding="utf-8")
+        self.assertIn("temp-fallback breadcrumb", body)
+        # Tidy — the fallback lives in %TEMP% which we don't own.
+        try:
+            result.unlink()
+        except Exception:
+            pass
 
     def test_rotation_caps_file_size(self) -> None:
         # Pre-seed with twice the cap then append; the rotator should

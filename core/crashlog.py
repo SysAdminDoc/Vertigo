@@ -55,19 +55,32 @@ def crash_log_path() -> Path:
 
 
 def _resolve_candidate() -> Path:
+    """Platform-appropriate crash log path.
+
+    Aligned 1:1 with :func:`vertigo._log_dir` so the bootstrap-layer
+    fatal-error log and the runtime breadcrumb log land in the same
+    file. Divergence here used to send Linux users to two separate
+    files (``vertigo/`` from this module, ``Vertigo/`` from the
+    bootstrap) and nobody would ever realise their history was split.
+    """
     override = os.environ.get("VERTIGO_CRASH_LOG")
     if override:
         return Path(override)
 
     if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+        base = Path(
+            os.environ.get("LOCALAPPDATA")
+            or os.environ.get("APPDATA")
+            or (Path.home() / "AppData" / "Local")
+        )
         return base / "Vertigo" / "crash.log"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Logs" / "Vertigo" / "crash.log"
-    # Linux / other POSIX — follow XDG base-dir spec.
+    # Linux / other POSIX — follow XDG base-dir spec. Directory is
+    # "Vertigo" (capitalised) to match vertigo.py::_log_dir exactly.
     xdg = os.environ.get("XDG_STATE_HOME")
     base = Path(xdg) if xdg else (Path.home() / ".local" / "state")
-    return base / "vertigo" / "crash.log"
+    return base / "Vertigo" / "crash.log"
 
 
 def _is_under(candidate: Path, ancestor: Path) -> bool:
@@ -116,21 +129,34 @@ def _rotate_if_needed(path: Path) -> None:
         pass
 
 
+def _temp_fallback() -> Path:
+    """Best-effort writable path when the preferred dir fails to mkdir.
+
+    Matches the ``vertigo.py::_log_dir`` escape hatch so a sandboxed
+    environment (read-only ``$HOME``, wiped ``$XDG_STATE_HOME``) still
+    leaves breadcrumbs somewhere.
+    """
+    base = Path(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp")
+    return base / "Vertigo-crash.log"
+
+
 def append(message: str) -> Path | None:
     """Append a single timestamped line to the crash log. Never raises.
 
     Returns the resolved path on success so tests can inspect it, or
-    ``None`` if the append failed (permissions, ENOSPC, etc).
+    ``None`` if both the preferred path and the TEMP fallback failed.
     """
-    try:
-        path = crash_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        line = f"{stamp} {message}\n"
-        with _LOCK:
-            _rotate_if_needed(path)
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line)
-        return path
-    except Exception:
-        return None
+    path = crash_log_path()
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    line = f"{stamp} {message}\n"
+    for candidate in (path, _temp_fallback()):
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            with _LOCK:
+                _rotate_if_needed(candidate)
+                with candidate.open("a", encoding="utf-8") as f:
+                    f.write(line)
+            return candidate
+        except Exception:
+            continue
+    return None
