@@ -6,7 +6,7 @@
 
 **Vertical video studio for short-form creators.**
 
-![version](https://img.shields.io/badge/version-0.11.1-cba6f7?style=for-the-badge)
+![version](https://img.shields.io/badge/version-0.12.0-cba6f7?style=for-the-badge)
 ![license](https://img.shields.io/badge/license-MIT-a6e3a1?style=for-the-badge)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-89b4fa?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.10%2B-f9e2af?style=for-the-badge)
@@ -28,7 +28,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Platform presets** — YouTube Shorts, TikTok, Instagram Reels, Square (1:1). One click switches output geometry and encoder target bitrate.
 - **Batch queue** — drop many clips at once, preview any one, then **Export All** to a folder. Per-item status indicator.
 - **Trim timeline** — dual-thumb in/out range slider directly on the preview. Exports respect the trim window via FFmpeg `-ss` / `-t`.
-- **Three one-click trim helpers** — *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
+- **Four one-click trim helpers** — *Suggest segments* (TextTiling-ranked 30-90 s candidates on clips > 10 min, reads the cached transcript — **new in v0.12.0**), *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
 - **Export thumbnails** — one-click save of six representative PNG cover frames (Katna-ranked when installed, evenly-spaced cv2 frames otherwise).
 - **Adjustments panel** — live brightness / contrast / saturation sliders; applied via FFmpeg `eq=` filter appended to the reframe chain.
 - **Scene detection** — PySceneDetect (with a histogram-delta fallback) segments the timeline to stabilize Smart Track.

@@ -80,11 +80,41 @@ never the latter.
   within 200 ms. Scene list also reused by Smart Track so the
   inline pass is skipped when the background worker has finished.
 
-- [ ] **T3b · Segment proposals via ClipsAI TextTiling** · ~3 h · ClipsAI (MIT, fork — upstream dead)
-  On import of > 10 min clips, produce a side panel of candidate
-  30–90 s segments with transcript previews. TextTiling boundaries
-  on WhisperX word stream, ranked by `?`-count, laughter tokens,
-  silence-gap heuristics. **Stop before the LLM step.**
+- [x] **T3b · Segment proposals via TextTiling** · ~3 h · v0.12.0 · stdlib+numpy (no ClipsAI dep)
+  Stream the already-cached faster-whisper word list through a local
+  TextTiling-style lexical-cohesion scorer (no new dependency — the
+  upstream ClipsAI fork is MIT but its dep chain drags in WhisperX /
+  torch). Emits candidate 30–90 s segments ranked by `?`-count,
+  laughter tokens (`haha`, `[laughter]`), and silence-gap
+  heuristics, surfaced via a **"Suggest segments"** trim-row button
+  that pops a ranked candidate menu. **Stop before the LLM step** —
+  charter-compliant; no ranking via LLM prompt, all signals are
+  local.
+
+## Tier 6 · v0.12.0 production hardening (factory-loop audit findings)
+
+- [x] **H1 · Unify opt-in `_try_pip_install` + add frozen-build guard** · v0.12.0
+  All eight opt-in modules (`core/subtitles.py`, `core/vad.py`,
+  `core/animated_captions.py`, `core/tracker_boxmot.py`,
+  `core/highlights.py`, `core/keyframes.py`, `core/diarize.py`,
+  `core/broll.py`) carried a duplicated `_try_pip_install(spec)`
+  helper that invoked `[sys.executable, "-m", "pip", ...]` with no
+  `_is_frozen()` short-circuit. In a PyInstaller build
+  `sys.executable` is `Vertigo.exe`, so any missing opt-in dep
+  would have relaunched the GUI recursively — the same fork-bomb
+  class that `vertigo.py::_pip_install()` already guards against.
+  Consolidate into `core/_lazy.py::pip_install()` with a single
+  frozen-build guard + a `_pip_install_disabled` hook used by the
+  regression test so the frozen path is verifiable. Drop eight
+  copies of the helper in favour of the shared one.
+
+- [x] **H2 · Regression test for fork-bomb guard** · v0.12.0
+  `tests/test_lazy_install.py` — monkey-patches `sys.frozen = True`
+  and asserts every module's `ensure_installed()` returns `False`
+  without ever constructing a subprocess command. Also asserts the
+  non-frozen path is wired to a mockable install hook. Pins the H1
+  fix so a future re-introduction of the duplicated helper fails
+  the test suite.
 
 - [x] **T3c · Hook-energy score** · ~1 h · v0.9.0 · no new deps
   `core/hook_score.py` produces a 0–100 "first-3-second" score from

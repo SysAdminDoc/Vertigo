@@ -2,6 +2,38 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.12.0] - 2026-04-24
+
+### Segment proposals + fork-bomb hardening across opt-in modules
+
+Two themes: ship **T3b · Segment proposals** (the last explicit open ROADMAP item) and close a real P0 hazard that had been hiding across every opt-in `core/*` module.
+
+#### T3b · Suggest segments trim button
+
+- **`core/segment_proposals.py`** — new, pure-stdlib TextTiling-style segmenter. Takes the already-cached `faster-whisper` caption list, slides K=20-token windows, computes Jaccard similarity between adjacent windows, promotes silence gaps >= 2.5 s as boundaries, then greedily assembles 30-90 s candidate segments targeting 45 s. Scoring is a deterministic weighted sum: `?`-count (40 %), laughter tokens (20 %, regex-matched against `haha`/`hehe`/`lol`/`[laughter]`/`*laughs*`), length-fit around `target_sec` (40 %), plus a silence-edge bonus when clean cut points abut either side. No LLM, no network, no new dep — per charter "stop before the LLM step". Original ROADMAP line pointed at ClipsAI; that fork is MIT but drags WhisperX + torch, so we reject it and use the already-cached transcript.
+- **`workers/segment_proposals_worker.py`** — `QThread` wrapper around `propose_segments` so the TextTiling sweep stays off the UI thread even though it's fast. Wired into `MainController.has_running_worker` / `shutdown` / `cancel_active`.
+- **`ui/video_player.py`** — new **"Suggest segments"** button on the trim row, controller-gated on `clip_duration > 10 min` + cached transcript. Tooltip rotates between "load a clip", "too short", "generate captions first", and the fully-unlocked help text.
+- **`ui/main_controller.py`** — `run_suggest_segments`, popup menu formatter `_format_segment_label` (timerange + score % + title hint + reasons), `_apply_segment_trim` drops the trim handles on the chosen span. `refresh_segments_button()` re-runs the gate from `_on_queue_select` and `_on_subs_done` so the button lights up the moment captions finish for a long clip.
+- **Tests** — 13 new cases in `tests/test_segment_proposals.py` including an explicit silence-boundary regression (the audit pass caught the synthetic fixture claiming silence gaps it didn't actually insert).
+
+#### H1 · Fork-bomb hardening across eight opt-in modules
+
+- **`core/_lazy.py`** — new shared `pip_install(spec)` helper with one `is_frozen()` short-circuit. PyInstaller builds get `sys.executable == Vertigo.exe`, so a missing opt-in dep hitting any of the previous eight per-file `_try_pip_install` helpers would have relaunched the GUI recursively — the same fork-bomb class that `vertigo.py::_pip_install` has guarded against since day one. The eight opt-in modules did not. They do now. Also adds a `threading.Lock` around the install call so two worker threads both discovering a missing dep don't run parallel pip installs (known to corrupt site-packages metadata).
+- **Refactored** `core/subtitles.py`, `core/vad.py`, `core/animated_captions.py`, `core/tracker_boxmot.py`, `core/highlights.py`, `core/keyframes.py`, `core/diarize.py`, `core/broll.py` (three call sites) to route through `core._lazy.pip_install`. Dead `import subprocess` / `import sys` removed where they became unused.
+- **`tests/test_lazy_install.py`** — 7 new regression tests pin the fix. `test_opt_in_ensure_funcs_block_install_when_frozen` monkey-patches `_lazy.is_frozen = True` + a spy `_pip_runner`, calls every `ensure_*` across all eight modules, asserts each returns False AND that the spy was never called. `test_no_private_try_pip_install_leftover` flunks the suite if a future drive-by reintroduces the per-file helper.
+
+#### Audit-cycle counter-fixes
+
+- `_gap_before` / `_gap_after` in `segment_proposals.py` returned the gap at the *first* pair-crossing, not the gap straddling the target timestamp — the edge-bonus scoring was firing on unrelated silences. Rewrote both helpers to find the pair with `a.end <= t <= b.start` and return that gap (or zero).
+- `_assemble_segments` replaced `best_score is math.inf` identity check with an explicit `found: bool` flag for readability.
+- Caption-readiness gate tightened: now `any(c.text.strip() for c in caps)` instead of truthy-list, so a transcript of empty-text captions no longer lights up the button.
+- `_on_segments_ready` / `_on_segments_failed` null out `segments_worker` to drop the QThread reference after the run completes.
+- `pip_install` now logs a `crash.log` breadcrumb when every strategy raises an exception (typically pip itself missing) so frozen-build failures leave a trail.
+
+#### Test suite
+
+- **108 -> 128 passing** (+1 skipped when `auto-editor` is installed). 13 new segment-proposal cases, 7 new lazy-install regression tests.
+
 ## [0.11.1] - 2026-04-23
 
 ### Pycaps pass moves off the GUI thread
