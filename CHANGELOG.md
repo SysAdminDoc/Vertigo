@@ -15,6 +15,13 @@ Factory-loop iteration advancing the "Next up" punch list from the v0.12.2 conti
 - **`_gap_before` / `_gap_after` use bisect.** Linear scan over every caption per `_score_segment` call was O(N·M) for M candidate segments — ~100 k comparisons on a two-hour clip. New shared `_straddling_gap()` takes a precomputed `starts` array and does `bisect_left`, dropping the cost to O(log N) per lookup. `propose_segments` precomputes the array once and threads it through scoring. New regression test pins scaling and bit-for-bit equivalence against the prior linear path.
 - **Test suite**: 144 → 154 passing (+8 `tests/test_crashlog.py`, +2 `tests/test_segment_proposals.py` for bisect scaling + parity).
 
+### Iter 2 — multilingual + observability parity (Tier 9)
+
+- **Multilingual stop-list for segment proposals.** `_STOP_WORDS` was English-only, so TextTiling cohesion over-counted every `le` / `la` / `der` / `die` on non-English transcripts and produced lumpy segment boundaries. Extended with `_STOP_WORDS_ES` / `_FR` / `_DE` / `_PT` / `_IT` sibling frozensets unioned into the main set. Charter-safe — no new deps, no NLTK, tables fit in-source.
+- **`core/_lazy.py` pip failures now land in `crash.log`.** The every-strategy-failed branch still printed via `sys.stderr`, which PyInstaller one-file builds discard. Routed through `core.crashlog.append` so the breadcrumb survives frozen builds — same fix R3 applied to the shutdown path, now applied to the opt-in-dep install path.
+- **`core/crashlog.py` path harmonised with the bootstrap.** `vertigo.py::_log_dir` writes fatal errors to `Vertigo\` on Windows / `Library/Logs/Vertigo/` on macOS / `$XDG_STATE_HOME/Vertigo/` on Linux. The crashlog module was lowercasing the Linux path (`vertigo/`), so bootstrap crashes and runtime breadcrumbs landed in different directories depending on where the failure happened. Capitalised the Linux dir, added the APPDATA fallback on Windows, honoured the TEMP fallback so sandboxed environments still leave breadcrumbs somewhere.
+- **Test suite**: 154 → 161 passing (+4 stop-list / tokenizer parity, +2 lazy-install crashlog breadcrumb, +1 Windows APPDATA branch). `test_append_is_noop_on_bad_parent` renamed + upgraded to prove the TEMP fallback kicks in.
+
 ## [0.12.2] - 2026-04-24
 
 ### Postflight security + review findings
