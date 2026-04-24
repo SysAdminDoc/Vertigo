@@ -106,15 +106,46 @@ never the latter.
   SRT can't carry per-line positioning. Opt-in toggle on the Captions
   tab.
 
-- [ ] **T4b · Pyannote speaker diarization** · ~4–6 h · WhisperX (BSD-2) + pyannote (MIT)
-  One ASS style per speaker with a distinct `PrimaryColour`. Gated
-  behind toggle — HF token + EULA click + ~500 MB model, lazy-
-  installed like faster-whisper.
+- [~] **T4b · Pyannote speaker diarization** · v0.11.0 · WhisperX (BSD-2) + pyannote (MIT)
+  `core.diarize` module landed with `diarize()` + `align_to_faces()`;
+  UI wiring deferred because it requires a HuggingFace token +
+  terms-acceptance flow. Users who opt in can drive the module
+  directly.
 
-- [ ] **T4c · Lighthouse moment-retrieval** · ~6–8 h · line/lighthouse (Apache-2)
-  QD-DETR text-query highlights ("the funny part about dogs" →
-  ranked timestamps). Power-user feature; 1–2 GB model, GPU-preferred.
-  Only real 2024–26 research that actually works vs commercial.
+- [x] **T4c · Lighthouse moment-retrieval** · v0.11.0 · line/lighthouse (Apache-2)
+  `core.highlights.score_spans(path, query=None)` ships with a
+  Lighthouse-primary / audio-energy-fallback implementation. Wired
+  into the "Find highlights" trim button — pops a ranked menu of
+  candidate moments; picking one drops the trim handles in place.
+
+## Tier 5 · Optional integrations landed in v0.11.0
+
+- [x] **Silero VAD silence trim** · `core.vad` + "Tighten to speech"
+  trim-row button. ONNX (no PyTorch), <2 MB. Pulls the handles to
+  the outer speech edges with 100 ms pad.
+- [x] **auto-editor silence cut planner** · `core.auto_edit` + "Trim
+  silences" trim-row button. Subprocess into the `auto-editor` CLI
+  with `--export json`; pops a menu of the longest speech-contiguous
+  sections.
+- [x] **BoxMOT speaker-ID tracking** · `core.tracker_boxmot` +
+  `make_tracker()` factory inside `FaceTracker.track_with_cameraman`.
+  Installing `boxmot` silently upgrades Smart Track to BoT-SORT /
+  ByteTrack / DeepOCSORT; AGPL-3.0 (desktop builds fine, SaaS triggers).
+- [x] **RetargetVid clustering filter** · `core.cluster_track`
+  temporal-persistence filter on per-frame face observations.
+  Two-pass Smart Track pipeline drops single-frame noise before
+  cameraman smoothing sees it. Pure numpy.
+- [x] **pycaps animated captions** · `core.animated_captions`
+  `render_composited()` drives `CapsPipelineBuilder` as a post-encode
+  pass. Six curated pycaps templates exposed in the Subtitles panel
+  style picker.
+- [x] **Katna keyframe export** · `core.keyframes` + "Export
+  thumbnails" hero-header button. Katna-ranked when installed, cv2
+  evenly-spaced fallback always available.
+- [~] **B-roll auto-insertion** · `core.broll` planner module
+  (KeyBERT + Pexels + CLIP); UI deferred because Pexels requires a
+  free API key / signup. Planner is importable for users who want
+  to drive it programmatically.
 
 ---
 

@@ -2,6 +2,75 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.11.0] - 2026-04-23
+
+### Design-system polish + deep hardening + nine optional integrations
+
+A marathon release across three themes: finish the premium-polish pass, harden the whole worker + encode pipeline, and expose a broad optional-integrations surface so power users can upgrade the product incrementally.
+
+#### Design system (premium polish, continued)
+
+- **Checkmark glyph inside QCheckBox** — baked per-theme PNGs rendered from an SVG with `currentColor` tinting; wired into QSS `image:` on `:checked` / `:checked:hover` / `:indeterminate` / `:checked:disabled`. Writable cache under `%LOCALAPPDATA%/Vertigo/glyphs/<theme>/`; cache key is theme id + palette hash. Replaces the bare accent-fill that previously showed no glyph.
+- **Custom chevron for QComboBox::down-arrow** — same baking pipeline, three tints per theme (`subtext0` rest / `text` hover / `accent` focus/open). QSS selectors target `QComboBox::down-arrow`, `:hover::down-arrow`, `:focus::down-arrow`, `::down-arrow:on`.
+- **FadingTabWidget** (`ui/widgets.py`) — QTabWidget subclass with a 180 ms OutCubic cross-fade on tab change. Persistent `QGraphicsOpacityEffect` + `QPropertyAnimation` cached per page so rapid tab flicks don't stack effects and teardown races can't fire `finished()` on a dead target. Honours `QT_ANIMATION_DURATION_FACTOR=0` as the reduced-motion opt-out.
+- **`QTabWidget#sideTabs` CSS generalised** → plain `QTabWidget` + `QTabBar::tab`, so any `QTabWidget` (including `FadingTabWidget`) inherits the themed pane + rounded tab buttons. The old selectors had been dead since the side-tabs layout was removed.
+
+#### Architecture (main_window split)
+
+- **`ui/main_window.py` 1699 → ~1100 lines.** Worker lifecycle, batch driver, and every per-worker signal handler moved into a new **`ui/main_controller.py`**. Promoted to a real composed `QObject` (`self._ctl = MainController(self)`) with worker handles, analysis results, batch flags, and `last_output_path` extracted off the window. `closeEvent` collapsed from nine lines to `self._ctl.shutdown(1500)`. Signal wiring lives in `MainController.wire()`.
+- **`ui/panels.py`** — two genuinely pure build helpers (`build_tool_section`, `add_overview_metric`) extracted; the rest stay on `MainWindow` because extracting them would add cross-imports.
+- **`_clear_queue(confirm=True)`** kwarg so the smoke test exercises the real reset path.
+
+#### Production hardening
+
+Ten concrete defects fixed:
+
+- **MediaPipe sentinel race** (`core/detect.py`): tri-state `None`/object/`False` only checked `is None` in the hot path, so after an init failure every frame silently burned CPU through its own try/except. Replaced with typed string sentinels + fast-path `_MP_DISABLED` check.
+- **DetectWorker cancel contract**: no longer emits `finished_ok` with partial track after cancel.
+- **FFmpeg encode kill escalation**: `terminate → wait(3s) → kill → wait(3s) → abandon`. A stuck FFmpeg no longer hangs the worker forever.
+- **Subtitles-filter path escape**: single quotes escaped as `'\''` (FFmpeg idiom). Clip files with apostrophes no longer break the filter graph.
+- **`_crop_dims` divide-by-zero guards** and **`_x_expression` bounded stride** (max 128 keyframes, first + last pinned) so long clips don't blow libavfilter's parser.
+- **`clip_subs` cleanup on queue removal**.
+- **`MainController.shutdown()`** logs worker-wait timeouts instead of silently exiting.
+- **`FileDropZone`** filters on `Path.is_file()` as well as suffix.
+- Minor: `hook_score` dead guard removed + sample_rate-0 early return; `batch_queue` ID counter → `itertools.count(1)`; pluralizations.
+
+#### Optional integrations (nine core/ modules)
+
+Every module follows the `core.subtitles` lazy-install pattern — `is_available()` probes cheaply, `ensure_installed()` tries a pip install, public API raises `RuntimeError` with a clear install hint when absent. Optional manifest at `requirements-optional.txt`.
+
+- **`core.vad`** — Silero VAD (ONNX, <2 MB, no PyTorch).
+- **`core.animated_captions`** — pycaps wrapper. `render_composited(source, out, captions, template)` drives `CapsPipelineBuilder` as a post-encode pass. Real pycaps template names: `default`, `hype`, `minimalist`, `word-focus`, `explosive`, `vibrant`.
+- **`core.tracker_boxmot`** — BoxMOT (AGPL-3.0) speaker-ID tracking via `make_tracker()` factory. Drop-in swap inside `FaceTracker.track_with_cameraman`.
+- **`core.auto_edit`** — auto-editor subprocess with `--export json`; parses both timeline shapes.
+- **`core.highlights`** — Lighthouse moment retrieval + sliding-window `hook_score` fallback.
+- **`core.cluster_track`** — RetargetVid cluster-then-temporal-filter port. Pure numpy.
+- **`core.diarize`** — pyannote.audio with a clear HF-token check.
+- **`core.broll`** — transcript → KeyBERT → Pexels → CLIP pipeline with a stdlib-only keyword fallback.
+- **`core.keyframes`** — Katna-ranked thumbnails with cv2 fallback. Always usable on a bare install.
+
+#### Seven integrations wired into the UI
+
+- **Smart Track two-pass pipeline** now runs through `cluster_track` — short-lived noise detections filtered before speaker/cameraman smoothing.
+- **Smart Track tracker** via `make_tracker()` — installing `boxmot` silently upgrades to BoT-SORT.
+- **"Tighten to speech"** trim button (Silero VAD).
+- **"Find highlights"** trim button (Lighthouse + fallback) → popup menu of ranked moments.
+- **"Trim silences"** trim button (auto-editor) → popup menu of longest speech-contiguous sections.
+- **"Export thumbnails"** hero-header button (Katna + cv2 fallback).
+- **Animated captions** (pycaps) in the Subtitles panel style picker — selecting a template routes the export through a post-encode pycaps pass.
+
+Not wired per user preference: `core.diarize` (HuggingFace token / signup) and `core.broll` (Pexels API key / signup). Both remain available as importable modules.
+
+#### Test suite
+
+- **58 → 101 passing** (+ 1 skipped when `auto-editor` is present locally, a correct branch).
+- `tests/test_hardening.py` — 11 regression guards pinning every hardening-pass fix.
+- `tests/test_integrations.py` — 33 smoke tests covering every optional module's contract (including `_captions_to_whisper_json` uses `word` key, not `text`).
+- `tests/test_main_window_smoke.py` — MainWindow construction + core signal paths.
+- `tests/test_fading_tab_widget.py` — cross-theme construction + reduced-motion opt-out.
+
+---
+
 ## [0.10.0] - 2026-04-23
 
 ### Tier 4a · Face-aware caption positioning
