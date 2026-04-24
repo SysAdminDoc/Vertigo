@@ -282,6 +282,17 @@ class VideoPlayer(QWidget):
         self.tighten_btn.setAccessibleName("Tighten trim to detected speech")
         self.tighten_btn.setEnabled(False)
 
+        self.highlights_btn = QPushButton("Find highlights")
+        self.highlights_btn.setObjectName("ghostBtn")
+        self.highlights_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.highlights_btn.setToolTip(
+            "Scan the clip for high-energy moments. Click a result to "
+            "drop the trim handles on it. Uses Lighthouse when "
+            "installed; falls back to an audio-energy sweep otherwise."
+        )
+        self.highlights_btn.setAccessibleName("Find highlight moments")
+        self.highlights_btn.setEnabled(False)
+
         self._trim_hint = QLabel("Load a clip to scrub, trim in and out points, and snap to scene cuts.")
         self._trim_hint.setObjectName("valueMuted")
         self._trim_hint.setWordWrap(True)
@@ -301,6 +312,7 @@ class VideoPlayer(QWidget):
         trim_row = QHBoxLayout()
         trim_row.setSpacing(10)
         trim_row.addWidget(self._trim_label, 1)
+        trim_row.addWidget(self.highlights_btn)
         trim_row.addWidget(self.tighten_btn)
 
         lay = QVBoxLayout(self)
@@ -323,6 +335,7 @@ class VideoPlayer(QWidget):
         self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
         self.tighten_btn.setEnabled(True)
+        self.highlights_btn.setEnabled(True)
         self._time.setProperty("tone", "accent")
         self._time.style().unpolish(self._time)
         self._time.style().polish(self._time)
@@ -360,6 +373,7 @@ class VideoPlayer(QWidget):
         self._play_btn.setToolTip("Play preview (Space)")
         self._play_btn.setAccessibleName("Play preview")
         self.tighten_btn.setEnabled(False)
+        self.highlights_btn.setEnabled(False)
         self._time.setText("0:00 / 0:00")
         self._time.setProperty("tone", None)
         self._time.style().unpolish(self._time)

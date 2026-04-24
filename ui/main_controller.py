@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QObject, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QFontMetrics
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMenu, QMessageBox
 
 from core.encode import EncodeJob
 from core.probe import VideoInfo, probe
@@ -57,6 +57,7 @@ from workers.detect_worker import DetectWorker
 from workers.encode_worker import EncodeWorker
 from workers.scene_worker import SceneWorker
 from workers.subtitle_worker import SubtitleWorker
+from workers.highlights_worker import HighlightsWorker
 from workers.vad_worker import VadWorker
 
 from .batch_queue import QueueEntry, QueueStatus
@@ -87,6 +88,7 @@ class MainController(QObject):
         self.subtitle_worker: SubtitleWorker | None = None
         self.scene_worker: SceneWorker | None = None
         self.vad_worker: VadWorker | None = None
+        self.highlights_worker: HighlightsWorker | None = None
 
         # analysis results (consumed by export and UI refreshers)
         self.track_points: list = []
@@ -125,11 +127,18 @@ class MainController(QObject):
         w._player.position_changed.connect(w._sync_track_pos)
         w._player.trim_changed.connect(w._on_trim_changed)
         w._player.tighten_btn.clicked.connect(self.run_tighten_silences)
+        w._player.highlights_btn.clicked.connect(self.run_find_highlights)
         w._export_thumbs_btn.clicked.connect(self.export_thumbnails)
 
     # --------------------------------------------------------------- status
     def has_running_worker(self) -> bool:
-        for w in (self.detect_worker, self.encode_worker, self.subtitle_worker, self.vad_worker):
+        for w in (
+            self.detect_worker,
+            self.encode_worker,
+            self.subtitle_worker,
+            self.vad_worker,
+            self.highlights_worker,
+        ):
             if w is not None and w.isRunning():
                 return True
         return False
@@ -155,6 +164,7 @@ class MainController(QObject):
             self.subtitle_worker,
             self.scene_worker,
             self.vad_worker,
+            self.highlights_worker,
         ):
             if worker is None or not worker.isRunning():
                 continue
@@ -360,6 +370,92 @@ class MainController(QObject):
         if msg == "Cancelled.":
             return
         w._toast.show_toast(msg, kind="warning")
+
+    # --------------------------------------------------------------- highlights
+    def run_find_highlights(self) -> None:
+        """Score the clip for high-energy moments and pop a menu the
+        user can pick from to drop the trim on the chosen span.
+
+        Uses ``core.highlights.score_spans`` which transparently chooses
+        Lighthouse (when installed) or a fallback sliding-window audio
+        energy sweep. Either path runs on ``HighlightsWorker``.
+        """
+        w = self.win
+        if not w._info:
+            w._toast.show_toast("Load a clip first.", kind="warning")
+            return
+        if self.highlights_worker and self.highlights_worker.isRunning():
+            return
+
+        w._toast.show_toast("Scanning for highlights\u2026", kind="info")
+        w._player.highlights_btn.setEnabled(False)
+
+        worker = HighlightsWorker(video_path=w._info.path, top_n=5)
+        worker.finished_ok.connect(self._on_highlights_ready)
+        worker.failed.connect(self._on_highlights_failed)
+        self.highlights_worker = worker
+        worker.start()
+
+    def _on_highlights_ready(self, highlights: list) -> None:
+        w = self.win
+        w._player.highlights_btn.setEnabled(True)
+        if not highlights:
+            w._toast.show_toast(
+                "No clear highlights detected in this clip.",
+                kind="warning",
+            )
+            return
+        self._present_highlights_menu(highlights)
+
+    def _on_highlights_failed(self, msg: str) -> None:
+        w = self.win
+        w._player.highlights_btn.setEnabled(True)
+        if msg == "Cancelled.":
+            return
+        w._toast.show_toast(msg, kind="warning")
+
+    def _present_highlights_menu(self, highlights: list) -> None:
+        """Show a popup menu of ranked highlights anchored to the
+        Find-highlights button. Clicking an entry drops the trim.
+
+        Highlights are already sorted best-score-first by the
+        controller; we display them that way but keep the timeline
+        position in the label so users can see where they are.
+        """
+        w = self.win
+        menu = QMenu(w)
+        menu.setAccessibleName("Highlight moments")
+
+        for h in highlights:
+            label = self._format_highlight_label(h)
+            action = menu.addAction(label)
+            # Capture start/end per-action; lambdas in a loop would bind
+            # to the last value otherwise.
+            action.triggered.connect(
+                lambda _checked=False, s=float(h.start), e=float(h.end):
+                    self._apply_highlight_trim(s, e)
+            )
+
+        # Anchor the menu below the button that triggered it.
+        btn = w._player.highlights_btn
+        global_pos = btn.mapToGlobal(btn.rect().bottomLeft())
+        menu.exec(global_pos)
+
+    def _format_highlight_label(self, h) -> str:
+        score_pct = int(round(max(0.0, min(1.0, float(h.score))) * 100))
+        return (
+            f"{_fmt_duration(max(0.0, float(h.start)))} \u2013 "
+            f"{_fmt_duration(max(0.0, float(h.end)))}"
+            f"   \u00b7   {score_pct}%   [{h.source}]"
+        )
+
+    def _apply_highlight_trim(self, start: float, end: float) -> None:
+        w = self.win
+        w._player.set_trim_range(start, end)
+        w._trim_low = start
+        w._trim_high = end
+        w._refresh_platform_notice()
+        w._refresh_overview()
 
     # --------------------------------------------------------------- detection
     def run_detect(self) -> None:
@@ -739,7 +835,8 @@ class MainController(QObject):
         has_detect = bool(self.detect_worker and self.detect_worker.isRunning())
         has_subs = bool(self.subtitle_worker and self.subtitle_worker.isRunning())
         has_vad = bool(self.vad_worker and self.vad_worker.isRunning())
-        if not has_encode and not has_detect and not has_subs and not has_vad:
+        has_hl = bool(self.highlights_worker and self.highlights_worker.isRunning())
+        if not has_encode and not has_detect and not has_subs and not has_vad and not has_hl:
             return
         self.batch_running = False
         w._cancel_btn.setEnabled(False)
@@ -752,6 +849,8 @@ class MainController(QObject):
             self.subtitle_worker.cancel()
         if has_vad and self.vad_worker:
             self.vad_worker.cancel()
+        if has_hl and self.highlights_worker:
+            self.highlights_worker.cancel()
         w._refresh_overview()
 
     def _reset_export_ui(self) -> None:
