@@ -34,12 +34,14 @@ class DetectWorker(QThread):
         smoothing: float = 0.6,
         *,
         crop_width_frac: float | None = None,
+        use_cluster_filter: bool = True,
     ) -> None:
         super().__init__()
         self._path = Path(video_path)
         self._sample_fps = sample_fps
         self._smoothing = smoothing
         self._crop_width_frac = crop_width_frac
+        self._use_cluster_filter = use_cluster_filter
         self._cancel = False
 
     def cancel(self) -> None:
@@ -54,6 +56,7 @@ class DetectWorker(QThread):
                     crop_width_frac=self._crop_width_frac,
                     progress_cb=self.progress.emit,
                     cancel_cb=lambda: self._cancel,
+                    use_cluster_filter=self._use_cluster_filter,
                 )
             else:
                 points = tracker.track(

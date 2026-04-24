@@ -182,6 +182,25 @@ class ClusterTrackSmokeTests(unittest.TestCase):
         self.assertEqual(len(out), 10)
         self.assertTrue(all(len(f) == 1 for f in out))
 
+    def test_face_tracker_accepts_use_cluster_filter_kwarg(self) -> None:
+        """The kwarg added in the wiring pass must reach
+        ``track_with_cameraman`` and the cluster_filter import must
+        succeed without triggering detection on a real clip."""
+        from core.detect import FaceTracker
+        tracker = FaceTracker()
+        try:
+            # The kwarg must be accepted (keyword-only). A bad clip path
+            # returns [] — we only need the call not to raise on the
+            # signature.
+            points = tracker.track_with_cameraman(
+                "/tmp/does-not-exist.mp4",
+                crop_width_frac=0.5,
+                use_cluster_filter=True,
+            )
+            self.assertEqual(points, [])
+        finally:
+            tracker.close()
+
     def test_cluster_filter_drops_single_frame_noise(self) -> None:
         """A face that appears once and disappears should be filtered."""
         from core.cameraman import FaceObservation

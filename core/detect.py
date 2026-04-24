@@ -122,6 +122,14 @@ class FaceTracker:
     # `crop_width_frac` is the 9:16 viewport's width as a fraction of the
     # source width. The cameraman tuning (dead-zone, big-jump threshold,
     # per-frame speeds) needs this to scale correctly per clip geometry.
+    #
+    # When ``use_cluster_filter`` is True we run a two-pass pipeline:
+    # collect all per-frame observations, hand them to
+    # ``core.cluster_track.cluster_filter`` to drop single-frame noise
+    # and duplicate detections, then feed the cleaned stream through
+    # the speaker + cameraman smoothing. The first pass owns 0–90% of
+    # the progress bar (detection dominates wall time) and the second
+    # owns 90–100%.
     # ------------------------------------------------------------------
     def track_with_cameraman(
         self,
@@ -129,6 +137,8 @@ class FaceTracker:
         crop_width_frac: float,
         progress_cb=None,
         cancel_cb=None,
+        *,
+        use_cluster_filter: bool = False,
     ) -> list[TrackPoint]:
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -139,16 +149,21 @@ class FaceTracker:
         duration = total_frames / src_fps if src_fps else 0.0
         step_frames = max(1, int(round(src_fps / self.sample_fps)))
 
-        frame_idx = 0
-        points: list[TrackPoint] = []
-
-        # Grab first frame to learn source geometry and initialise the
-        # cameraman + speaker tracker.
+        # Pass 1: detection. Collect per-frame observations plus the
+        # source width and each frame's index/time so the second pass
+        # can advance the cameraman without re-opening the video.
+        detect_budget = 0.9 if use_cluster_filter else 1.0
+        frames_obs: list[list[FaceObservation]] = []
+        frame_indices: list[int] = []
         src_w: int | None = None
-        cameraman: SmoothedCameraman | None = None
-        speakers = SpeakerTracker()
+
+        def _det_progress(fraction: float) -> None:
+            if progress_cb is None:
+                return
+            progress_cb(max(0.0, min(detect_budget, fraction * detect_budget)))
 
         try:
+            frame_idx = 0
             while True:
                 if cancel_cb and cancel_cb():
                     break
@@ -163,19 +178,14 @@ class FaceTracker:
                     if total_frames and frame_idx >= total_frames:
                         break
                     continue
-
                 if src_w is None:
                     src_w = w
-                    crop_w_px = max(1.0, float(crop_width_frac) * w)
-                    cameraman = SmoothedCameraman(
-                        crop_width_px=crop_w_px,
-                        source_width_px=float(w),
-                    )
 
+                t = frame_idx / src_fps if src_fps else 0.0
                 observations = [
                     FaceObservation(
                         frame=frame_idx,
-                        t=frame_idx / src_fps if src_fps else 0.0,
+                        t=t,
                         cx=bx + bw / 2,
                         cy=by + bh / 2,
                         w=bw,
@@ -184,29 +194,64 @@ class FaceTracker:
                     )
                     for (bx, by, bw, bh, conf) in self._detect_boxes(frame, w, h)
                 ]
+                frames_obs.append(observations)
+                frame_indices.append(frame_idx)
 
-                active = speakers.step(frame_idx, observations)
-                target_cx = active.cx if active else (cameraman.center_x if cameraman else w / 2.0)
-                new_cx = cameraman.step(target_cx) if cameraman else target_cx
-
-                t = frame_idx / src_fps if src_fps else 0.0
-                confidence = active.total_score if active else 0.1
-                points.append(
-                    TrackPoint(
-                        t=t,
-                        x=float(new_cx / max(1, w)),
-                        confidence=float(min(1.0, confidence / 4.0)),
-                    )
-                )
-
-                if progress_cb and duration:
-                    progress_cb(min(1.0, t / duration))
+                if duration > 0:
+                    _det_progress(min(1.0, t / duration))
 
                 frame_idx += step_frames
                 if total_frames and frame_idx >= total_frames:
                     break
         finally:
             cap.release()
+
+        if not frames_obs or src_w is None:
+            return []
+
+        if use_cluster_filter:
+            try:
+                from .cluster_track import cluster_filter
+                frames_obs = cluster_filter(frames_obs, source_width=int(src_w))
+            except Exception:
+                # The filter is an enhancement — any failure should not
+                # break Smart Track. Fall through to the raw stream.
+                pass
+
+        # Pass 2: speaker + cameraman smoothing over the (possibly
+        # filtered) observation stream. The video file is already
+        # released; everything we need is in-memory.
+        cameraman = SmoothedCameraman(
+            crop_width_px=max(1.0, float(crop_width_frac) * src_w),
+            source_width_px=float(src_w),
+        )
+        speakers = SpeakerTracker()
+
+        points: list[TrackPoint] = []
+        total_steps = max(1, len(frames_obs))
+        for i, (fi, observations) in enumerate(zip(frame_indices, frames_obs)):
+            if cancel_cb and cancel_cb():
+                break
+
+            active = speakers.step(fi, observations)
+            target_cx = active.cx if active else cameraman.center_x
+            new_cx = cameraman.step(target_cx)
+
+            t = fi / src_fps if src_fps else 0.0
+            confidence = active.total_score if active else 0.1
+            points.append(
+                TrackPoint(
+                    t=t,
+                    x=float(new_cx / max(1, src_w)),
+                    confidence=float(min(1.0, confidence / 4.0)),
+                )
+            )
+
+            if progress_cb is not None:
+                smoothed_fraction = (i + 1) / total_steps
+                progress_cb(
+                    detect_budget + (1.0 - detect_budget) * smoothed_fraction
+                )
 
         return points
 
