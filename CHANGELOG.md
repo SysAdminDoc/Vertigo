@@ -2,6 +2,21 @@
 
 All notable changes to Vertigo are documented here.
 
+## [0.12.1] - 2026-04-24
+
+### Audit-cycle hardening — pycaps + worker lifecycle + segment cancel
+
+A point release across three unrelated defects the post-0.12.0 audit surfaced. All production-facing, zero new features.
+
+- **`_on_pycaps_failed` no longer crashes when the clip was cleared mid-export.** Resolves `reframed_out` through `ctx["reframed_out"]` → `ctx["tmp_out"]` → `self.last_output_path`, then checks that the candidate file actually exists. If nothing usable survives (first-run pycaps crash, user cleared the queue before pycaps returned), the slot now routes through `_on_export_fail` instead of finalising an empty `Path('.')` as "Complete" — the user sees an honest "Export failed" toast instead of a lying success UI.
+- **Worker-handle cleanup across every slot.** `vad_worker`, `highlights_worker`, `auto_edit_worker`, and `pycaps_worker` now get nulled out in both their `_on_*_ready` and `_on_*_failed` slots, matching the pattern `segments_worker` introduced in v0.12.0. Drops the stale QThread references the moment the run finishes instead of pinning them until the next run replaces them.
+- **Segment proposals honour user-cancel on pathological clips.** Threaded `cancel_cb` through `propose_segments`, `_boundaries`, `_assemble_segments`, and `_score_segment` so the TextTiling sweep + scoring pass both poll the worker's `_cancel` flag. Previously the worker's `cancel()` was a false facade — a user who hit Cancel on a 2-hour transcript would wait seconds for the synchronous scoring loop to exit.
+- **`BatchQueue.clear()` now emits `entry_removed` per id.** Pre-existing bug surfaced by the iter-2 focus on subs-clear invalidation: the toolbar's "Clear queue" wiped `_items` / `_entries` without emitting per-entry signals, so `MainController.drop_clip_subs` never ran for cleared entries. Cached SRT/ASS files, `clip_captions`, and `animated_styles` leaked. Now routes every removal through the same signal path.
+- **`on_subs_cleared` drops the cached caption list + animated-style selection.** Clearing the SRT from the subtitles panel used to preserve `clip_captions[entry.id]`, so the Suggest-segments button stayed lit against stale data. Now the cached captions + animated style are dropped and `refresh_segments_button()` runs so the gate re-evaluates.
+- **`Caption` / `Word` extracted to `core/caption_types.py`.** New callers import from there; `core.subtitles` re-exports via `from .caption_types import Caption, Word` (both `__all__` + class identity preserved) so existing imports still work. Lets `core/segment_proposals.py` import the dataclass shape without dragging the transcoder's `caption_layout` + `caption_styles` + `face_samples` chain.
+- **Counter-audit found the audit's own gaps.** `test_gap_after_mirrors_gap_before` now asserts the two symmetric straddling cases that the original test skipped. New `BatchQueueClearTests` pins the `entry_removed` emission. New `test_pycaps_failed_without_usable_output_routes_to_failure` guards against the Path('.') regression.
+- **Test suite**: 128 → 139 passing (+11 new regression cases).
+
 ## [0.12.0] - 2026-04-24
 
 ### Segment proposals + fork-bomb hardening across opt-in modules

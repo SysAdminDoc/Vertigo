@@ -116,6 +116,51 @@ never the latter.
   fix so a future re-introduction of the duplicated helper fails
   the test suite.
 
+## Tier 7 · v0.12.1 audit-cycle hardening
+
+- [x] **H3 · `_on_pycaps_failed` resilient to missing `_info`** · v0.12.1
+  If the user removes the loaded clip mid-export, `_on_pycaps_failed`
+  hits `self.win._info.path` on a `None` window info, raises
+  `AttributeError`, and `_finish_export_done` never runs — UI stuck
+  in the export-busy state (cancel button hidden, export button
+  hidden, status stuck at "Applying animated captions…"). Fall back
+  to the cached temp-reframed path or an empty `Path()` and always
+  reach the finaliser.
+
+- [x] **H4 · Worker-handle null-out consistency** · v0.12.1
+  Every `_on_*_ready` / `_on_*_failed` slot should null the worker
+  handle (`self.x_worker = None`) so the `QThread` reference drops
+  immediately after completion. Current behaviour pins the object
+  until the next run of the same worker replaces it. The v0.12.0
+  `segments_worker` already does this; apply to `highlights_worker`,
+  `auto_edit_worker`, `vad_worker`, `pycaps_worker`.
+
+- [x] **H5 · Real cancel cooperation for segment proposals** · v0.12.1
+  `SegmentProposalsWorker.cancel()` currently just flips a flag the
+  synchronous `propose_segments` never checks. On very long
+  transcripts (hours-long dashcam / lecture clips) the user-cancel
+  does not actually stop the sweep. Thread a `cancel_cb` through
+  `propose_segments` and check it at each outer loop head
+  (`_boundaries`, `_assemble_segments`, `_score_segment`).
+
+- [x] **H6 · Extract `Caption` / `Word` to `core/caption_types.py`** · v0.12.1
+  `core/segment_proposals.py` only needs the `Caption` dataclass
+  shape yet its import chain drags `caption_layout`, `caption_styles`,
+  and `face_samples` through `core/subtitles.py`. Lift the two
+  dataclasses out; re-export from `core/subtitles.py` for binary
+  compatibility.
+
+- [x] **H7 · `on_subs_cleared` must drop `clip_captions` + refresh segments button** · v0.12.1
+  Clearing the SRT from the subtitles panel does not drop the
+  cached caption list, so the Suggest-segments button stays enabled
+  against stale data. Clear both, then call
+  `refresh_segments_button()` so the gate re-evaluates.
+
+- [x] **H8 · Coverage: `_gap_before` / `_gap_after` regression** · v0.12.1
+  The v0.12.0 L4 pass rewrote both helpers to find the straddling
+  pair; no direct unit-test pinned that fix (the only assertion was
+  indirect via reasons-string). Add direct tests.
+
 - [x] **T3c · Hook-energy score** · ~1 h · v0.9.0 · no new deps
   `core/hook_score.py` produces a 0–100 "first-3-second" score from
   FFmpeg-extracted 16 kHz mono PCM + per-frame RMS/ZCR voice
