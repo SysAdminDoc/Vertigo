@@ -96,10 +96,12 @@ class MainController(QObject):
         self.track_points: list = []
         self.scenes: list[tuple[float, float]] = []
         self.clip_subs: dict[int, Path] = {}
-        # Per-clip pycaps overlay MOV. Populated by the subtitle worker
-        # when an animated style was requested; consumed by
-        # _run_encode_job as EncodeJob.overlay_video.
-        self.animated_overlays: dict[int, Path] = {}
+        # Per-clip parsed caption list + pycaps template id. When an
+        # animated style is active we keep the caption list alongside
+        # the template so the post-encode step can hand pycaps its
+        # transcript without a second Whisper pass.
+        self.clip_captions: dict[int, list] = {}
+        self.animated_styles: dict[int, str] = {}
 
         # batch driver state
         self.batch_running: bool = False
@@ -190,11 +192,9 @@ class MainController(QObject):
     def drop_clip_subs(self, entry_id: int) -> None:
         """Release per-clip subtitle state for a removed queue entry.
 
-        The transcribe worker writes an auto-generated SRT/ASS into the
-        clip's parent directory; when the user removes the clip from the
-        queue we should delete that file and forget the mapping to avoid
-        leaking disk state across sessions. Also clears the animated
-        overlay MOV when one was rendered for this entry.
+        Unlinks the auto-generated SRT/ASS, forgets the cached caption
+        list, and forgets any animated-style selection so the clip's
+        removal leaves no lingering disk or memory state.
         """
         path = self.clip_subs.pop(entry_id, None)
         if path is not None:
@@ -202,12 +202,8 @@ class MainController(QObject):
                 path.unlink(missing_ok=True)
             except Exception:
                 pass
-        overlay = self.animated_overlays.pop(entry_id, None)
-        if overlay is not None:
-            try:
-                overlay.unlink(missing_ok=True)
-            except Exception:
-                pass
+        self.clip_captions.pop(entry_id, None)
+        self.animated_styles.pop(entry_id, None)
 
     # --------------------------------------------------------------- captions
     def on_subs_cleared(self) -> None:
@@ -236,19 +232,16 @@ class MainController(QObject):
 
         from core.caption_styles import resolve as resolve_caption_preset
 
-        # Pycaps presets are a separate namespace — the preset_id is
-        # ``pycaps:<style>``. Route the animated render while keeping
-        # the base transcription on a compatible ``CaptionPreset`` so
-        # the SRT/ASS file that the libass path consumes still gets
-        # written.
+        # Pycaps presets live in a separate namespace — the preset_id
+        # arrives as ``pycaps:<template>``. We remember the template
+        # per-entry so _on_export_done can run pycaps as a post-pass.
+        # For the base transcription we just use a reasonable default
+        # preset ("pop") so the libass path also has something to
+        # render with if the user turns pycaps off later.
         animated_style: str | None = None
         if isinstance(preset_id, str) and preset_id.startswith("pycaps:"):
             animated_style = preset_id.split(":", 1)[1] or None
-            base_preset_id = "karaoke-bold" if "karaoke-bold" in (
-                getattr(p, "id", None) for p in (
-                    resolve_caption_preset(x) for x in ("karaoke-bold",)
-                )
-            ) else "pop"
+            base_preset_id = "pop"
         else:
             base_preset_id = preset_id
         preset = resolve_caption_preset(base_preset_id)
@@ -270,6 +263,13 @@ class MainController(QObject):
         w._refresh_overview()
 
         entry_id = w._current_entry.id
+        # Remember the animated style on the entry so _on_export_done
+        # can run the pycaps post-pass after the main encode finishes.
+        if animated_style:
+            self.animated_styles[entry_id] = animated_style
+        else:
+            self.animated_styles.pop(entry_id, None)
+
         self.subtitle_worker = SubtitleWorker(
             w._info.path,
             out_dir,
@@ -279,31 +279,18 @@ class MainController(QObject):
             language=language,
             face_aware=face_aware,
             letterbox=is_letterbox,
-            animated_style=animated_style,
+            force_word_level=bool(animated_style),
         )
         self.subtitle_worker.progress.connect(w._subs_panel.set_progress)
         self.subtitle_worker.status.connect(w._subs_panel.set_status)
+        self.subtitle_worker.captions_ready.connect(
+            lambda caps, eid=entry_id: self.clip_captions.__setitem__(eid, caps)
+        )
         self.subtitle_worker.finished_ok.connect(
             lambda srt, eid=entry_id: self._on_subs_done(srt, eid)
         )
-        self.subtitle_worker.overlay_ready.connect(
-            lambda ovl, eid=entry_id: self._on_overlay_ready(ovl, eid)
-        )
         self.subtitle_worker.failed.connect(self._on_subs_fail)
         self.subtitle_worker.start()
-
-    def _on_overlay_ready(self, overlay_str: str, entry_id: int) -> None:
-        """Store the pycaps overlay path so _run_encode_job picks it up."""
-        self.animated_overlays[entry_id] = Path(overlay_str)
-        w = self.win
-        # No toast — the caption-ready toast already fired on
-        # finished_ok. Just update the status inline so the user knows
-        # the animated overlay is wired in for burn-in.
-        w._subs_panel.set_status(
-            "Animated caption overlay ready \u2014 will composite on export.",
-            tone="success",
-        )
-        w._refresh_overview()
 
     def _on_subs_done(self, srt_str: str, entry_id: int) -> None:
         srt = Path(srt_str)
@@ -755,9 +742,14 @@ class MainController(QObject):
             srt_path = sub_choice.srt_path
             burn = True
 
-        overlay_video = (
-            self.animated_overlays.get(entry.id) if entry else None
-        )
+        # When an animated pycaps style is active for this entry, skip
+        # libass burn-in during the main encode — pycaps will burn its
+        # own captions in the post-encode pass and two stacks of
+        # subtitles would collide.
+        will_animate = bool(entry and self.animated_styles.get(entry.id))
+        if will_animate:
+            burn = False
+
         job = EncodeJob(
             info=info,
             preset=w._preset,
@@ -771,7 +763,6 @@ class MainController(QObject):
             subtitles_path=srt_path,
             burn_subtitles=burn,
             caption_preset_id=(sub_choice.preset_id if sub_choice else None),
-            overlay_video=overlay_video,
         )
 
         if entry:
@@ -932,12 +923,24 @@ class MainController(QObject):
 
     def _on_export_done(self, out: str, entry_id: int | None) -> None:
         w = self.win
-        self.last_output_path = Path(out)
+        out_path = Path(out)
+
+        # Pycaps post-encode pass: when the entry had an animated
+        # style selected, run pycaps over the just-finished reframed
+        # output with the cached Whisper transcript. pycaps re-encodes
+        # to a sibling file which then replaces the original.
+        animated_style = (
+            self.animated_styles.get(entry_id) if entry_id is not None else None
+        )
+        if animated_style and entry_id is not None:
+            out_path = self._apply_pycaps_pass(out_path, entry_id, animated_style)
+
+        self.last_output_path = out_path
         w._export_progress.setValue(100)
         self.win._set_export_status("Complete", tone="success")
-        self._append_log(f"[done] Exported {Path(out).name}")
-        self._show_output_destination(Path(out))
-        w._toast.show_toast(f"Exported {Path(out).name}", kind="success")
+        self._append_log(f"[done] Exported {out_path.name}")
+        self._show_output_destination(out_path)
+        w._toast.show_toast(f"Exported {out_path.name}", kind="success")
         if entry_id is not None:
             w._queue.update_status(entry_id, QueueStatus.DONE, "exported")
         w._refresh_queue_count()
@@ -946,6 +949,77 @@ class MainController(QObject):
             self._advance_batch()
         else:
             self._reset_export_ui()
+
+    def _apply_pycaps_pass(
+        self,
+        reframed_out: Path,
+        entry_id: int,
+        template: str,
+    ) -> Path:
+        """Run pycaps over a just-finished export so the final file has
+        animated captions burned in.
+
+        Returns the path of the final file — either the pycaps output
+        (which replaces the original in-place) on success, or the
+        original reframed output if pycaps failed / wasn't installed.
+        Failures are surfaced via the log panel + a toast rather than
+        raising, so the user still gets a usable export.
+        """
+        w = self.win
+        from core import animated_captions
+
+        if not animated_captions.is_available():
+            self._append_log(
+                "[warn] pycaps selected but not installed — skipping "
+                "animated-caption pass."
+            )
+            return reframed_out
+        captions = self.clip_captions.get(entry_id)
+        if not captions:
+            self._append_log(
+                "[warn] pycaps pass skipped: no transcript cached. "
+                "Generate captions before exporting."
+            )
+            return reframed_out
+
+        self.win._set_export_status("Rendering animated captions\u2026", tone="accent")
+        self._append_log(f"[pycaps] template={template}")
+
+        tmp_out = reframed_out.with_name(
+            f"{reframed_out.stem}.pycaps{reframed_out.suffix}"
+        )
+        try:
+            animated_captions.render_composited(
+                reframed_out,
+                tmp_out,
+                captions,
+                template=template,
+            )
+        except Exception as e:
+            self._append_log(f"[pycaps error] {type(e).__name__}: {e}")
+            try:
+                tmp_out.unlink(missing_ok=True)
+            except Exception:
+                pass
+            w._toast.show_toast(
+                f"Animated captions failed: {e}. Export kept without them.",
+                kind="warning",
+                duration_ms=5000,
+            )
+            return reframed_out
+
+        # Swap the new file into the original name so downstream
+        # references (open-folder, batch accounting) keep working.
+        try:
+            reframed_out.unlink(missing_ok=True)
+            tmp_out.replace(reframed_out)
+        except Exception as e:
+            self._append_log(
+                f"[pycaps warn] Couldn't swap output ({e}); leaving pycaps "
+                f"copy at {tmp_out}."
+            )
+            return tmp_out
+        return reframed_out
 
     def _on_export_fail(self, msg: str, entry_id: int | None) -> None:
         w = self.win

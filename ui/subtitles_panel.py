@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.animated_captions import (
-    available_styles as animated_available_styles,
+    available_templates as animated_available_templates,
     is_available as animated_is_available,
 )
 from core.caption_styles import PRESETS as CAPTION_PRESETS, default_preset as default_caption_preset
@@ -118,15 +118,16 @@ class SubtitlesPanel(QWidget):
             self._preset_combo.addItem(preset.label, preset.id)
 
         # Animated (pycaps) options. When the package is installed we
-        # add one entry per supported style, each carrying the
-        # "pycaps:<name>" id so the controller can route the render.
-        # When it isn't installed we add a single disabled entry so
-        # users discover the capability and see the install hint.
+        # add one entry per supported template, each carrying the
+        # "pycaps:<name>" id so the controller can route the post-
+        # encode pycaps render. When it isn't installed we add a
+        # single disabled entry so users discover the capability
+        # and see the install hint.
         if animated_is_available():
             self._preset_combo.insertSeparator(self._preset_combo.count())
-            for style in animated_available_styles():
+            for template in animated_available_templates():
                 self._preset_combo.addItem(
-                    f"Animated \u00b7 {style}", f"{_PYCAPS_PREFIX}{style}"
+                    f"Animated \u00b7 {template}", f"{_PYCAPS_PREFIX}{template}"
                 )
         else:
             self._preset_combo.insertSeparator(self._preset_combo.count())
@@ -278,11 +279,11 @@ class SubtitlesPanel(QWidget):
     def _refresh_preset_hint(self) -> None:
         preset_id = self._preset_combo.currentData() or "pop"
         if isinstance(preset_id, str) and preset_id.startswith(_PYCAPS_PREFIX):
-            style = preset_id[len(_PYCAPS_PREFIX):]
+            template = preset_id[len(_PYCAPS_PREFIX):]
             self._preset_hint.setText(
-                f"Animated captions rendered by pycaps ({style}). "
-                "The overlay composites over the final export — "
-                "expect a longer render than the libass path."
+                f"pycaps template: {template}. Runs as a second encode "
+                "pass after the main export, so the final file is longer "
+                "to produce than a libass burn-in."
             )
             return
         if preset_id == _PYCAPS_DISABLED_DATA:

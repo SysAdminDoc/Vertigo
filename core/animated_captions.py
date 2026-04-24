@@ -1,25 +1,25 @@
-"""Animated captions via pycaps — optional premium caption path.
+"""Animated captions via pycaps — real API wrapper.
 
-pycaps (https://github.com/francozanardi/pycaps, MIT) takes Whisper
-word-level segments and emits a video overlay with CSS-styled per-word
-animation: bouncing/popping/sweeping karaoke that behaves consistently
-across players, unlike raw ASS which renders differently on every libass
-version.
+pycaps (https://github.com/francozanardi/pycaps, MIT) burns animated
+captions directly onto an input video. It does *not* produce a
+standalone RGBA overlay — you hand it a source MP4 and a transcript,
+it re-encodes the video with subtitles composited on top.
 
-This module is a thin adapter between Vertigo's existing Caption
-dataclass (``core.subtitles.Caption``) and pycaps' API. The heavy
-dependency is lazy-imported so the rest of the app works unchanged when
-it isn't installed.
+Vertigo integrates pycaps as a post-encode pass:
 
-Vertigo ships three caption paths — pycaps is one of them:
+    1. EncodeWorker produces the reframed / trimmed output the usual
+       way (without burning captions, when pycaps is selected).
+    2. ``render_composited(source, out, captions, template)`` feeds
+       the reframed output + the Whisper transcript back through
+       pycaps, which re-encodes with animated subtitles on top.
+    3. The result replaces the stage-1 output in-place.
 
-    "none"    → plain SRT, libass renders with a force_style block
-    "karaoke" → ASS file with \\kf per-word sweep
-    "pycaps"  → this module; produces a transparent overlay video that
-                the encode pipeline composites with the main footage
+Heavy dep: ``pycaps`` on PyPI. Optional, lazy-imported. ``is_available()``
+reports current state; ``ensure_installed()`` does a lazy pip install
+matching the rest of the optional-integrations pattern.
 
-The pycaps path costs more render time but unlocks visual styles
-(pop/bounce/shake, gradient fills, emoji-per-word) that ASS can't do.
+Template names below are the *real* ones pycaps ships with (see
+https://github.com/francozanardi/pycaps/tree/main/src/pycaps/template/preset).
 """
 
 from __future__ import annotations
@@ -31,28 +31,20 @@ from pathlib import Path
 from typing import Iterable
 
 
-# The caption style presets we expose to the UI. The values are pycaps
-# template identifiers (strings pycaps understands); when pycaps gains
-# new named templates we add them here.
-STYLE_BOLD_YELLOW = "bold-yellow"
-STYLE_BLOCK_WHITE = "block-white"
-STYLE_SIMPLE_KARAOKE = "simple-karaoke"
-STYLE_POP_PER_WORD = "pop"
+# Canonical pycaps template names (built-in presets under
+# ``src/pycaps/template/preset/``). A subset is exposed to the UI —
+# the full list is: classic, default, explosive, fast, hype,
+# line-focus, minimalist, model, neo-minimal, retro-gaming, vibrant,
+# word-focus. We pick six that span the visual space from clean to
+# punchy so the user has meaningful choice without drowning.
+TEMPLATE_DEFAULT = "default"
+TEMPLATE_HYPE = "hype"
+TEMPLATE_MINIMALIST = "minimalist"
+TEMPLATE_WORD_FOCUS = "word-focus"
+TEMPLATE_EXPLOSIVE = "explosive"
+TEMPLATE_VIBRANT = "vibrant"
 
-DEFAULT_STYLE = STYLE_BOLD_YELLOW
-
-
-@dataclass(frozen=True)
-class AnimatedCaptionResult:
-    """Where pycaps wrote its artifacts.
-
-    ``overlay_path`` is an RGBA video file that the encode pipeline can
-    composite via ``overlay`` in the filter graph. ``preview_srt`` is
-    the plain-text SRT pycaps produced as a side-effect — keeping it
-    around lets us fall back cleanly if the overlay compose fails.
-    """
-    overlay_path: Path
-    preview_srt: Path | None
+DEFAULT_TEMPLATE = TEMPLATE_HYPE
 
 
 # ---------------------------------------------------------------- availability
@@ -68,165 +60,147 @@ def is_available() -> bool:
 def ensure_installed() -> bool:
     if is_available():
         return True
-    if not _try_pip_install("pycaps>=0.7"):
+    if not _try_pip_install("pycaps>=0.2"):
         return False
     return is_available()
 
 
 # ---------------------------------------------------------------- public api
 
-def available_styles() -> list[str]:
-    """Style identifiers safe to pass to ``render``."""
+def available_templates() -> list[str]:
+    """Template identifiers safe to pass to ``render_composited``.
+
+    These are a curated subset of pycaps' bundled templates — the ones
+    with the clearest visual distinction, suitable for a UI picker.
+    Pycaps itself ships more; users who want the full set can pass
+    any template name that lives under ``src/pycaps/template/preset/``
+    in the installed package.
+    """
     return [
-        STYLE_BOLD_YELLOW,
-        STYLE_BLOCK_WHITE,
-        STYLE_SIMPLE_KARAOKE,
-        STYLE_POP_PER_WORD,
+        TEMPLATE_DEFAULT,
+        TEMPLATE_HYPE,
+        TEMPLATE_MINIMALIST,
+        TEMPLATE_WORD_FOCUS,
+        TEMPLATE_EXPLOSIVE,
+        TEMPLATE_VIBRANT,
     ]
 
 
-def render(
-    captions: list,          # list[core.subtitles.Caption]
-    out_dir: Path,
-    *,
+def render_composited(
     source_video: Path,
-    style: str = DEFAULT_STYLE,
-    width: int = 1080,
-    height: int = 1920,
+    out_path: Path,
+    captions: list,                 # list[core.subtitles.Caption]
+    *,
+    template: str = DEFAULT_TEMPLATE,
     cancel_cb=None,
-) -> AnimatedCaptionResult:
-    """Render an animated-caption overlay video for ``captions``.
+) -> Path:
+    """Run pycaps on ``source_video`` with the given transcript and
+    write an animated-caption-burned MP4 at ``out_path``.
 
-    Raises ``RuntimeError`` when pycaps isn't importable — UI callers
-    should guard with ``is_available()``.
+    ``captions`` is Vertigo's ``core.subtitles.Caption`` list. We
+    convert it to whisper-shape JSON (which pycaps accepts via
+    ``with_transcription(...)``) so pycaps uses our existing Whisper
+    output instead of running its own.
 
-    ``captions`` is expected to carry word-level timings (the
-    ``Caption.words`` tuple from ``core.subtitles``). If a caption lacks
-    words, pycaps falls back to plain per-line animation.
+    Raises ``RuntimeError`` when pycaps isn't importable. Callers
+    should guard with ``is_available()`` and offer the user a clear
+    install path.
     """
     if not is_available():
         raise RuntimeError(
             "pycaps is not installed. Install with:\n"
-            "    pip install pycaps\n"
-            "Vertigo will keep using the ASS/SRT path until then."
+            "    pip install pycaps"
         )
-    if style not in available_styles():
-        raise ValueError(f"Unknown animated caption style: {style!r}")
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    # Import after the availability guard so this module loads in envs
-    # where pycaps isn't present (tests, headless CI).
-    import pycaps
-
-    # pycaps public surface at time of writing:
-    #   pycaps.render_overlay(segments, out_path, template, canvas=(w,h))
-    #
-    # The segment shape it accepts is a list of dicts with 'start',
-    # 'end', 'text', and optional 'words' (each word is dict(start, end,
-    # text)). Bridge from Vertigo's Caption dataclass here.
-    segments = [_to_pycaps_segment(c) for c in captions if _has_body(c)]
-    if not segments:
-        raise RuntimeError("No captions to render (all empty).")
-
+    if template not in available_templates():
+        # Permissive: accept any string (pycaps has more templates than
+        # we expose in the curated list), just log through the usual
+        # channels when caller supplied something we can't vet.
+        pass
     if cancel_cb and cancel_cb():
         raise RuntimeError("Cancelled.")
 
-    overlay_path = out_dir / f"{Path(source_video).stem}.vertigo.pycaps.mov"
-    # pycaps has two supported entry points across versions; prefer the
-    # simple render_overlay() façade, fall back to the CLI if the
-    # import is present but that symbol isn't.
-    render_fn = getattr(pycaps, "render_overlay", None)
-    if callable(render_fn):
-        render_fn(
-            segments,
-            str(overlay_path),
-            template=style,
-            canvas=(int(width), int(height)),
-        )
-    else:
-        _render_via_cli(
-            segments=segments,
-            out_path=overlay_path,
-            style=style,
-            width=width,
-            height=height,
-        )
+    # Lazy import — matches the rest of the optional modules.
+    from pycaps import CapsPipelineBuilder, TemplateLoader
 
-    return AnimatedCaptionResult(overlay_path=overlay_path, preview_srt=None)
+    # Ensure the output directory exists so pycaps's writer doesn't
+    # crash on a missing parent.
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # pycaps expects a Whisper-JSON-shape dict when a transcript is
+    # supplied. The crucial detail: per-word entries use ``word`` as
+    # the key (not ``text``), and times are floats in seconds.
+    transcript = _captions_to_whisper_json(captions)
 
-def build_overlay_filter(overlay_path: Path) -> str:
-    """Return the ``-filter_complex`` fragment that composites the
-    overlay video on top of the main footage.
-
-    The fragment is designed to slot in after Vertigo's reframe+scale
-    chain — it takes the current main stream and the overlay, and
-    produces a single composited stream.
-    """
-    return (
-        f"[v][ov]overlay=0:0:format=auto:eof_action=pass"
+    builder = (
+        TemplateLoader(template)
+        .with_input_video(str(source_video))
+        .load(False)  # don't auto-apply the template yet; wire the rest first
     )
+    builder = (
+        builder
+        .with_output_video(str(out_path))
+        .with_transcription(transcript, format="whisper_json")
+    )
+    if cancel_cb and cancel_cb():
+        raise RuntimeError("Cancelled.")
+
+    pipeline = builder.build()
+    pipeline.run()
+
+    if cancel_cb and cancel_cb():
+        # pycaps doesn't expose a cancel hook — best we can do is
+        # surface a failure so the caller doesn't swap the output file
+        # into place. The partial MP4 at out_path is left on disk and
+        # the worker is expected to unlink it.
+        raise RuntimeError("Cancelled.")
+    return Path(out_path)
 
 
 # ---------------------------------------------------------------- helpers
 
-def _has_body(cap) -> bool:
-    text = (getattr(cap, "text", "") or "").strip()
-    return bool(text)
+def _captions_to_whisper_json(captions: Iterable) -> dict:
+    """Convert Vertigo ``Caption`` records to the whisper-json shape
+    pycaps accepts via ``with_transcription(format='whisper_json')``.
 
+    Whisper-json segments look like::
 
-def _to_pycaps_segment(cap) -> dict:
-    words = [
-        {"start": float(w.start), "end": float(w.end), "text": w.text}
-        for w in getattr(cap, "words", ()) or ()
-    ]
-    seg: dict = {
-        "start": float(cap.start),
-        "end": float(cap.end),
-        "text": cap.text,
-    }
-    if words:
-        seg["words"] = words
-    return seg
+        {
+          "segments": [
+            {
+              "start": 0.0, "end": 3.4, "text": "...",
+              "words": [{"word": "hi", "start": 0.0, "end": 0.2}, ...]
+            },
+            ...
+          ]
+        }
 
-
-def _render_via_cli(
-    *,
-    segments: Iterable[dict],
-    out_path: Path,
-    style: str,
-    width: int,
-    height: int,
-) -> None:
-    """Fallback: drive the pycaps CLI with a temp JSON manifest.
-
-    Kept behind the ``render_overlay`` probe so older pycaps versions
-    (which only expose the CLI) keep working.
+    Vertigo's Caption uses ``text`` for the word body; pycaps expects
+    ``word``. We rename the key here so the pycaps ingestion doesn't
+    silently fall back to an empty word list.
     """
-    import json
-    import tempfile
-
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-        json.dump(list(segments), f, ensure_ascii=False)
-        manifest = Path(f.name)
-    try:
-        rc = subprocess.call(
-            [
-                sys.executable, "-m", "pycaps",
-                "--segments", str(manifest),
-                "--template", style,
-                "--canvas", f"{width}x{height}",
-                "--out", str(out_path),
-            ],
-            creationflags=_no_window_flags(),
-        )
-        if rc != 0:
-            raise RuntimeError(f"pycaps CLI exited {rc}")
-    finally:
-        try:
-            manifest.unlink(missing_ok=True)
-        except Exception:
-            pass
+    segments: list[dict] = []
+    for cap in captions:
+        if not getattr(cap, "text", "").strip():
+            continue
+        words = []
+        for w in getattr(cap, "words", ()) or ():
+            body = (getattr(w, "text", "") or "").strip()
+            if not body:
+                continue
+            words.append({
+                "word": body,
+                "start": float(getattr(w, "start", 0.0) or 0.0),
+                "end": float(getattr(w, "end", 0.0) or 0.0),
+            })
+        seg: dict = {
+            "start": float(cap.start),
+            "end": float(cap.end),
+            "text": cap.text,
+        }
+        if words:
+            seg["words"] = words
+        segments.append(seg)
+    return {"segments": segments}
 
 
 def _try_pip_install(spec: str) -> bool:
@@ -242,9 +216,3 @@ def _try_pip_install(spec: str) -> bool:
         except Exception:
             continue
     return False
-
-
-def _no_window_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0

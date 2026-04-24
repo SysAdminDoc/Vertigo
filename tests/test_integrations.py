@@ -67,26 +67,46 @@ class AnimatedCaptionsSmokeTests(unittest.TestCase):
         from core import animated_captions
         self.assertIsInstance(animated_captions.is_available(), bool)
 
-    def test_available_styles_returns_known_set(self) -> None:
-        from core.animated_captions import available_styles, DEFAULT_STYLE
-        styles = available_styles()
-        self.assertIn(DEFAULT_STYLE, styles)
-        self.assertTrue(all(isinstance(s, str) for s in styles))
+    def test_available_templates_returns_known_set(self) -> None:
+        from core.animated_captions import available_templates, DEFAULT_TEMPLATE
+        templates = available_templates()
+        self.assertIn(DEFAULT_TEMPLATE, templates)
+        self.assertTrue(all(isinstance(t, str) for t in templates))
+        # The names MUST be real pycaps template ids, not inventions.
+        # Guard against future refactors that rename them away.
+        for expected in ("default", "hype", "minimalist", "word-focus"):
+            self.assertIn(expected, templates)
 
-    def test_render_raises_when_unavailable(self) -> None:
+    def test_render_composited_raises_when_unavailable(self) -> None:
         from core import animated_captions
         if animated_captions.is_available():
             self.skipTest("pycaps is installed; availability guard not reachable")
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(RuntimeError):
-                animated_captions.render(
-                    [], Path(tmp), source_video=Path("/tmp/x.mp4"),
+                animated_captions.render_composited(
+                    source_video=Path("/tmp/x.mp4"),
+                    out_path=Path(tmp) / "out.mp4",
+                    captions=[],
                 )
 
-    def test_build_overlay_filter_shape(self) -> None:
-        from core.animated_captions import build_overlay_filter
-        frag = build_overlay_filter(Path("/tmp/anything.mov"))
-        self.assertIn("overlay", frag)
+    def test_captions_to_whisper_json_uses_word_key(self) -> None:
+        """Regression guard: pycaps accepts whisper-json where per-word
+        entries are keyed by ``word`` (NOT ``text``). An earlier version
+        of this module emitted ``text`` and pycaps silently fell back
+        to an empty word list."""
+        from core.animated_captions import _captions_to_whisper_json
+        from core.subtitles import Caption, Word
+        caption = Caption(
+            start=0.0, end=1.0, text="hi there",
+            words=(Word(start=0.0, end=0.3, text="hi"),
+                   Word(start=0.3, end=1.0, text="there")),
+        )
+        result = _captions_to_whisper_json([caption])
+        self.assertIn("segments", result)
+        seg = result["segments"][0]
+        self.assertIn("words", seg)
+        self.assertEqual(seg["words"][0]["word"], "hi")
+        self.assertNotIn("text", seg["words"][0])
 
 
 # ---------------------------------------------------------------- tracker_boxmot
@@ -264,9 +284,14 @@ class DiarizeSmokeTests(unittest.TestCase):
 
 class EncodeOverlaySupportTests(unittest.TestCase):
     """``EncodeJob.overlay_video`` must route the encode through a
-    ``-filter_complex`` graph that composites the overlay video over
-    the reframed main stream. Without it, the filter chain stays on
-    the simpler ``-vf`` path for binary-compat with older callers.
+    ``-filter_complex`` graph that composites an RGBA overlay video
+    on top of the reframed main stream. Without it, the filter chain
+    stays on the simpler ``-vf`` path.
+
+    This is generic infrastructure — pycaps doesn't use it (pycaps
+    burns directly via its own encode pass; see
+    ``core.animated_captions.render_composited``). The field is here
+    for any future feature that DOES produce an RGBA overlay.
     """
 
     def _build_job(self, overlay: Path | None):
