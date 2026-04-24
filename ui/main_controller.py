@@ -125,6 +125,7 @@ class MainController(QObject):
         w._player.position_changed.connect(w._sync_track_pos)
         w._player.trim_changed.connect(w._on_trim_changed)
         w._player.tighten_btn.clicked.connect(self.run_tighten_silences)
+        w._export_thumbs_btn.clicked.connect(self.export_thumbnails)
 
     # --------------------------------------------------------------- status
     def has_running_worker(self) -> bool:
@@ -258,6 +259,48 @@ class MainController(QObject):
         w._subs_panel.set_status(f"Transcription failed: {msg}", tone="warning")
         w._toast.show_toast(msg, kind="error")
         w._refresh_overview()
+
+    # --------------------------------------------------------------- thumbnails
+    def export_thumbnails(self) -> None:
+        """Write six representative thumbnails (PNG) from the loaded
+        clip to a user-chosen folder.
+
+        Uses ``core.keyframes`` — Katna when installed, evenly-spaced
+        cv2 frames as the always-available fallback. The call runs on
+        the GUI thread because the cv2 path is fast (<1 s for six
+        frames on a 1080p clip); if Katna is installed and users hit
+        long clips we can lift this onto a worker later.
+        """
+        from core import keyframes
+        from .file_dialogs import get_existing_directory
+
+        w = self.win
+        if not w._info:
+            w._toast.show_toast("Load a clip first.", kind="warning")
+            return
+        out_dir = get_existing_directory(w, "Folder for thumbnails")
+        if not out_dir:
+            return
+        try:
+            written = keyframes.save_thumbnails(
+                w._info.path,
+                Path(out_dir),
+                n=6,
+                prefix=w._info.path.stem,
+            )
+        except Exception as e:
+            w._toast.show_toast(f"Thumbnail export failed: {e}", kind="error")
+            return
+        if not written:
+            w._toast.show_toast(
+                "Couldn't decode any frames from this clip.",
+                kind="warning",
+            )
+            return
+        w._toast.show_toast(
+            f"Saved {len(written)} thumbnail{'' if len(written) == 1 else 's'}",
+            kind="success",
+        )
 
     # --------------------------------------------------------------- tighten
     def run_tighten_silences(self) -> None:

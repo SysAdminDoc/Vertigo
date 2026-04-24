@@ -206,6 +206,15 @@ class MainWindow(QMainWindow):
         self._hero_output_btn.setToolTip("Open the folder containing the latest export")
         self._hero_output_btn.hide()
         header.addWidget(self._hero_output_btn)
+        self._export_thumbs_btn = QPushButton("Export thumbnails")
+        self._export_thumbs_btn.setObjectName("ghostBtn")
+        self._export_thumbs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._export_thumbs_btn.setToolTip(
+            "Save six representative PNG frames from the active clip "
+            "(for thumbnails, A/B covers, or posting previews)."
+        )
+        self._export_thumbs_btn.setEnabled(False)
+        header.addWidget(self._export_thumbs_btn)
         self._meta_label = QLabel("Waiting for a clip")
         self._meta_label.setObjectName("statusPill")
         self._meta_label.setMaximumWidth(560)
@@ -940,6 +949,7 @@ class MainWindow(QMainWindow):
         self._preview_stack.setCurrentWidget(self._player)
         self._player.set_shot_boundaries([])  # clear stale ticks from prior clip
         self._export_btn.setEnabled(True)
+        self._export_thumbs_btn.setEnabled(True)
         self._titlebar.set_subtitle(f"Ready - {entry.path.name}")
         self._player.set_aspect(self._preset.width, self._preset.height)
         self._trim_low = 0.0
@@ -1033,6 +1043,7 @@ class MainWindow(QMainWindow):
         self._set_meta_text("Waiting for a clip")
         self._export_btn.setEnabled(False)
         self._export_all_btn.setEnabled(False)
+        self._export_thumbs_btn.setEnabled(False)
         self._titlebar.set_subtitle("Vertical video studio")
         self._export_progress.setValue(0)
         self._set_export_status("Idle")
