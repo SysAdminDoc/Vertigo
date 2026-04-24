@@ -182,6 +182,17 @@ class ClusterTrackSmokeTests(unittest.TestCase):
         self.assertEqual(len(out), 10)
         self.assertTrue(all(len(f) == 1 for f in out))
 
+    def test_face_tracker_imports_tracker_factory(self) -> None:
+        """Smart Track must pick up core.tracker_boxmot.make_tracker
+        so installing the optional `boxmot` dep flips the behaviour
+        automatically. We can't exercise the real tracker here without
+        a clip, but we can pin the module-level import contract so a
+        future refactor that removes it has a red test to show for it.
+        """
+        import core.detect as detect
+        from core.tracker_boxmot import make_tracker
+        self.assertIs(detect.make_tracker, make_tracker)
+
     def test_face_tracker_accepts_use_cluster_filter_kwarg(self) -> None:
         """The kwarg added in the wiring pass must reach
         ``track_with_cameraman`` and the cluster_filter import must

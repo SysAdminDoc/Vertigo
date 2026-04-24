@@ -20,7 +20,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .cameraman import FaceObservation, SmoothedCameraman, SpeakerTracker
+from .cameraman import FaceObservation, SmoothedCameraman
+from .tracker_boxmot import make_tracker
 
 
 @dataclass(frozen=True)
@@ -221,11 +222,17 @@ class FaceTracker:
         # Pass 2: speaker + cameraman smoothing over the (possibly
         # filtered) observation stream. The video file is already
         # released; everything we need is in-memory.
+        #
+        # ``make_tracker()`` picks BoxMOT's BoT-SORT when the boxmot
+        # package is installed (stable IDs across occlusion, much
+        # better on multi-speaker content) and falls back to the
+        # existing SpeakerTracker when it isn't — same interface
+        # either way so the cameraman loop below doesn't change.
         cameraman = SmoothedCameraman(
             crop_width_px=max(1.0, float(crop_width_frac) * src_w),
             source_width_px=float(src_w),
         )
-        speakers = SpeakerTracker()
+        speakers = make_tracker()
 
         points: list[TrackPoint] = []
         total_steps = max(1, len(frames_obs))
