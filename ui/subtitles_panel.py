@@ -24,8 +24,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.animated_captions import (
+    available_styles as animated_available_styles,
+    is_available as animated_is_available,
+)
 from core.caption_styles import PRESETS as CAPTION_PRESETS, default_preset as default_caption_preset
 from core.subtitles import AVAILABLE_MODELS, DEFAULT_MODEL
+
+
+_PYCAPS_PREFIX = "pycaps:"
+_PYCAPS_DISABLED_DATA = "__pycaps_unavailable__"
 
 
 _LANGUAGES: list[tuple[str | None, str]] = [
@@ -108,6 +116,31 @@ class SubtitlesPanel(QWidget):
         self._preset_combo.setToolTip("Preset look for burned-in captions")
         for preset in CAPTION_PRESETS.values():
             self._preset_combo.addItem(preset.label, preset.id)
+
+        # Animated (pycaps) options. When the package is installed we
+        # add one entry per supported style, each carrying the
+        # "pycaps:<name>" id so the controller can route the render.
+        # When it isn't installed we add a single disabled entry so
+        # users discover the capability and see the install hint.
+        if animated_is_available():
+            self._preset_combo.insertSeparator(self._preset_combo.count())
+            for style in animated_available_styles():
+                self._preset_combo.addItem(
+                    f"Animated \u00b7 {style}", f"{_PYCAPS_PREFIX}{style}"
+                )
+        else:
+            self._preset_combo.insertSeparator(self._preset_combo.count())
+            idx = self._preset_combo.count()
+            self._preset_combo.addItem(
+                "Animated (install pycaps to unlock)",
+                _PYCAPS_DISABLED_DATA,
+            )
+            # Grey the placeholder out so users can't select it.
+            model = self._preset_combo.model()
+            item = model.item(idx) if hasattr(model, "item") else None
+            if item is not None:
+                item.setEnabled(False)
+
         default_preset_idx = self._preset_combo.findData(default_caption_preset().id)
         if default_preset_idx >= 0:
             self._preset_combo.setCurrentIndex(default_preset_idx)
@@ -208,20 +241,29 @@ class SubtitlesPanel(QWidget):
 
     # ------------------------------------------------------------ impl
     def _choice(self) -> SubtitleChoice:
+        preset_id = self._preset_combo.currentData() or "pop"
+        # If the disabled placeholder somehow got selected (shouldn't
+        # be possible via keyboard, but defensive), fall back to the
+        # default preset so the encode pipeline stays on a real id.
+        if preset_id == _PYCAPS_DISABLED_DATA:
+            preset_id = "pop"
         return SubtitleChoice(
             burn_in=self._toggle.isChecked(),
             srt_path=self._srt_path,
             model=self._model.currentData(),
             language=self._language.currentData(),
-            preset_id=self._preset_combo.currentData() or "pop",
+            preset_id=preset_id,
             face_aware=self._face_aware.isChecked(),
         )
 
     def _emit_transcribe(self) -> None:
+        preset_id = self._preset_combo.currentData() or "pop"
+        if preset_id == _PYCAPS_DISABLED_DATA:
+            preset_id = "pop"
         self.transcribe_requested.emit(
             self._model.currentData(),
             self._language.currentData(),
-            self._preset_combo.currentData() or "pop",
+            preset_id,
             self._face_aware.isChecked(),
         )
 
@@ -235,6 +277,20 @@ class SubtitlesPanel(QWidget):
 
     def _refresh_preset_hint(self) -> None:
         preset_id = self._preset_combo.currentData() or "pop"
+        if isinstance(preset_id, str) and preset_id.startswith(_PYCAPS_PREFIX):
+            style = preset_id[len(_PYCAPS_PREFIX):]
+            self._preset_hint.setText(
+                f"Animated captions rendered by pycaps ({style}). "
+                "The overlay composites over the final export — "
+                "expect a longer render than the libass path."
+            )
+            return
+        if preset_id == _PYCAPS_DISABLED_DATA:
+            self._preset_hint.setText(
+                "Install pycaps to enable per-word animated captions:  "
+                "pip install pycaps"
+            )
+            return
         preset = CAPTION_PRESETS.get(preset_id)
         if preset is None:
             self._preset_hint.setText("")

@@ -96,6 +96,10 @@ class MainController(QObject):
         self.track_points: list = []
         self.scenes: list[tuple[float, float]] = []
         self.clip_subs: dict[int, Path] = {}
+        # Per-clip pycaps overlay MOV. Populated by the subtitle worker
+        # when an animated style was requested; consumed by
+        # _run_encode_job as EncodeJob.overlay_video.
+        self.animated_overlays: dict[int, Path] = {}
 
         # batch driver state
         self.batch_running: bool = False
@@ -189,15 +193,21 @@ class MainController(QObject):
         The transcribe worker writes an auto-generated SRT/ASS into the
         clip's parent directory; when the user removes the clip from the
         queue we should delete that file and forget the mapping to avoid
-        leaking disk state across sessions.
+        leaking disk state across sessions. Also clears the animated
+        overlay MOV when one was rendered for this entry.
         """
         path = self.clip_subs.pop(entry_id, None)
-        if path is None:
-            return
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        overlay = self.animated_overlays.pop(entry_id, None)
+        if overlay is not None:
+            try:
+                overlay.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     # --------------------------------------------------------------- captions
     def on_subs_cleared(self) -> None:
@@ -225,15 +235,35 @@ class MainController(QObject):
             return
 
         from core.caption_styles import resolve as resolve_caption_preset
-        preset = resolve_caption_preset(preset_id)
+
+        # Pycaps presets are a separate namespace — the preset_id is
+        # ``pycaps:<style>``. Route the animated render while keeping
+        # the base transcription on a compatible ``CaptionPreset`` so
+        # the SRT/ASS file that the libass path consumes still gets
+        # written.
+        animated_style: str | None = None
+        if isinstance(preset_id, str) and preset_id.startswith("pycaps:"):
+            animated_style = preset_id.split(":", 1)[1] or None
+            base_preset_id = "karaoke-bold" if "karaoke-bold" in (
+                getattr(p, "id", None) for p in (
+                    resolve_caption_preset(x) for x in ("karaoke-bold",)
+                )
+            ) else "pop"
+        else:
+            base_preset_id = preset_id
+        preset = resolve_caption_preset(base_preset_id)
 
         is_letterbox = w._mode is ReframeMode.BLUR_LETTERBOX
 
         out_dir = w._info.path.parent
         w._subs_panel.set_running(True)
         face_note = "  \u00b7  face-aware" if face_aware and not is_letterbox else ""
+        animated_note = (
+            f"  \u00b7  animated ({animated_style})" if animated_style else ""
+        )
         w._subs_panel.set_status(
-            f"Transcribing {w._info.path.name} with whisper-{model} \u2014 {preset.label} style{face_note}"
+            f"Transcribing {w._info.path.name} with whisper-{model} "
+            f"\u2014 {preset.label} style{face_note}{animated_note}"
         )
         if not subtitles_installed():
             w._subs_panel.set_status("Installing faster-whisper (one-time, ~200 MB)\u2026")
@@ -249,14 +279,31 @@ class MainController(QObject):
             language=language,
             face_aware=face_aware,
             letterbox=is_letterbox,
+            animated_style=animated_style,
         )
         self.subtitle_worker.progress.connect(w._subs_panel.set_progress)
         self.subtitle_worker.status.connect(w._subs_panel.set_status)
         self.subtitle_worker.finished_ok.connect(
             lambda srt, eid=entry_id: self._on_subs_done(srt, eid)
         )
+        self.subtitle_worker.overlay_ready.connect(
+            lambda ovl, eid=entry_id: self._on_overlay_ready(ovl, eid)
+        )
         self.subtitle_worker.failed.connect(self._on_subs_fail)
         self.subtitle_worker.start()
+
+    def _on_overlay_ready(self, overlay_str: str, entry_id: int) -> None:
+        """Store the pycaps overlay path so _run_encode_job picks it up."""
+        self.animated_overlays[entry_id] = Path(overlay_str)
+        w = self.win
+        # No toast — the caption-ready toast already fired on
+        # finished_ok. Just update the status inline so the user knows
+        # the animated overlay is wired in for burn-in.
+        w._subs_panel.set_status(
+            "Animated caption overlay ready \u2014 will composite on export.",
+            tone="success",
+        )
+        w._refresh_overview()
 
     def _on_subs_done(self, srt_str: str, entry_id: int) -> None:
         srt = Path(srt_str)
@@ -708,6 +755,9 @@ class MainController(QObject):
             srt_path = sub_choice.srt_path
             burn = True
 
+        overlay_video = (
+            self.animated_overlays.get(entry.id) if entry else None
+        )
         job = EncodeJob(
             info=info,
             preset=w._preset,
@@ -721,6 +771,7 @@ class MainController(QObject):
             subtitles_path=srt_path,
             burn_subtitles=burn,
             caption_preset_id=(sub_choice.preset_id if sub_choice else None),
+            overlay_video=overlay_video,
         )
 
         if entry:

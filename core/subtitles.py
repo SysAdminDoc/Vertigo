@@ -197,6 +197,20 @@ def write_ass(
     return out_path
 
 
+@dataclass(frozen=True)
+class TranscribeResult:
+    """What ``transcribe_and_write`` returns.
+
+    ``path`` is the written SRT or ASS file (preserves the previous
+    ``transcribe_to_file`` return contract). ``captions`` is the full
+    list of transcribed ``Caption`` objects, exposed so callers can
+    hand them to a downstream renderer (e.g. pycaps) without running
+    Whisper a second time.
+    """
+    path: Path
+    captions: list["Caption"]
+
+
 def transcribe_to_file(
     source: Path,
     out_dir: Path,
@@ -208,22 +222,58 @@ def transcribe_to_file(
     face_aware: bool = False,
     letterbox: bool = False,
     face_sample_fps: float = 2.0,
+    force_word_level: bool = False,
     progress_cb=None,
     cancel_cb=None,
 ) -> Path:
     """Transcribe `source`, writing the format the preset requires.
 
     Returns the path to the generated subtitle file (.srt or .ass).
+    Callers that also want the parsed caption list (e.g. to hand to
+    pycaps) should use :func:`transcribe_and_write` — this function
+    is kept with the original return shape for binary compatibility.
 
-    When ``face_aware`` is True, faces are sampled from the source at
-    ``face_sample_fps`` (default 2 Hz) before transcription and the ASS
-    writer emits per-chunk alignment overrides so captions never occlude
-    a face. Forces ASS output even for non-karaoke presets, since SRT
-    has no per-line positioning syntax. ``letterbox=True`` short-circuits
-    the face check (captions over blurred bars are always safe).
+    ``force_word_level`` requests word-level Whisper timings even when
+    the preset wouldn't normally need them. The animated-caption
+    renderer needs per-word timings to produce the per-word sweep.
+    """
+    return transcribe_and_write(
+        source,
+        out_dir,
+        preset=preset,
+        height_px=height_px,
+        model_name=model_name,
+        language=language,
+        face_aware=face_aware,
+        letterbox=letterbox,
+        face_sample_fps=face_sample_fps,
+        force_word_level=force_word_level,
+        progress_cb=progress_cb,
+        cancel_cb=cancel_cb,
+    ).path
+
+
+def transcribe_and_write(
+    source: Path,
+    out_dir: Path,
+    *,
+    preset: CaptionPreset | None = None,
+    height_px: int = 1920,
+    model_name: str = DEFAULT_MODEL,
+    language: str | None = None,
+    face_aware: bool = False,
+    letterbox: bool = False,
+    face_sample_fps: float = 2.0,
+    force_word_level: bool = False,
+    progress_cb=None,
+    cancel_cb=None,
+) -> TranscribeResult:
+    """Transcribe `source` and return both the written SRT/ASS path and
+    the full Caption list so callers can post-process without a second
+    Whisper pass.
     """
     preset = preset or default_preset()
-    want_words = preset.animation == "karaoke"
+    want_words = preset.animation == "karaoke" or bool(force_word_level)
 
     face_samples: list[FaceSample] | None = None
     if face_aware and not letterbox:
@@ -247,7 +297,7 @@ def transcribe_to_file(
 
     want_ass = (preset.animation == "karaoke" and any(c.words for c in captions)) or face_aware
     if want_ass:
-        return write_ass(
+        path = write_ass(
             captions,
             out_dir / f"{stem}.vertigo.ass",
             preset,
@@ -255,8 +305,11 @@ def transcribe_to_file(
             face_samples=face_samples,
             letterbox=letterbox,
         )
-    # Non-karaoke presets without face-aware use SRT; libass will still apply force_style.
-    return write_srt(captions, out_dir / f"{stem}.vertigo.srt")
+    else:
+        # Non-karaoke presets without face-aware use SRT; libass will
+        # still apply force_style from the preset at burn-in time.
+        path = write_srt(captions, out_dir / f"{stem}.vertigo.srt")
+    return TranscribeResult(path=path, captions=captions)
 
 
 # ---------------------------------------------------------- helpers

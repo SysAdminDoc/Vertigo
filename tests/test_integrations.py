@@ -262,6 +262,71 @@ class DiarizeSmokeTests(unittest.TestCase):
 
 # ---------------------------------------------------------------- broll
 
+class EncodeOverlaySupportTests(unittest.TestCase):
+    """``EncodeJob.overlay_video`` must route the encode through a
+    ``-filter_complex`` graph that composites the overlay video over
+    the reframed main stream. Without it, the filter chain stays on
+    the simpler ``-vf`` path for binary-compat with older callers.
+    """
+
+    def _build_job(self, overlay: Path | None):
+        from core.encode import EncodeJob
+        from core.presets import default_preset
+        from core.probe import VideoInfo
+        from core.reframe import ReframePlan
+
+        info = VideoInfo(
+            path=Path("/tmp/main.mp4"), width=1920, height=1080,
+            duration=10.0, fps=30.0, codec="h264", has_audio=True,
+            audio_codec="aac",
+        )
+        plan = ReframePlan(video_filter="crop=608:1080:656:0,scale=1080:1920")
+        return EncodeJob(
+            info=info,
+            preset=default_preset(),
+            plan=plan,
+            out_path=Path("/tmp/out.mp4"),
+            overlay_video=overlay,
+        )
+
+    def test_no_overlay_uses_vf(self) -> None:
+        job = self._build_job(overlay=None)
+        # build_command resolves ffmpeg_bin(); skip if absent.
+        from shutil import which
+        if not which("ffmpeg"):
+            self.skipTest("ffmpeg not on PATH")
+        cmd = job.build_command()
+        self.assertIn("-vf", cmd)
+        self.assertNotIn("-filter_complex", cmd)
+
+    def test_with_overlay_uses_filter_complex(self) -> None:
+        from shutil import which
+        if not which("ffmpeg"):
+            self.skipTest("ffmpeg not on PATH")
+        # Overlay file must exist for build_command to accept it.
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".mov", delete=False) as f:
+            f.write(b"")
+            overlay = Path(f.name)
+        try:
+            job = self._build_job(overlay=overlay)
+            cmd = job.build_command()
+            self.assertIn("-filter_complex", cmd)
+            self.assertNotIn("-vf", cmd)
+            # Overlay shows up as the second -i input.
+            i_positions = [i for i, a in enumerate(cmd) if a == "-i"]
+            self.assertEqual(len(i_positions), 2)
+            # The map directives route the composited video + main audio.
+            self.assertIn("-map", cmd)
+            self.assertIn("[v]", cmd)
+            self.assertIn("0:a", cmd)
+        finally:
+            try:
+                overlay.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 class BrollSmokeTests(unittest.TestCase):
     def test_keywords_fallback_runs_without_keybert(self) -> None:
         from core.broll import _keywords_fallback

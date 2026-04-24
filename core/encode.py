@@ -57,31 +57,70 @@ class EncodeJob:
     subtitles_path: Path | None = None   # burn this SRT/ASS into the video
     burn_subtitles: bool = False
     caption_preset_id: str | None = None  # resolved via caption_styles.resolve()
+    # Optional animated-caption overlay (e.g. a pycaps RGBA video). When
+    # set, this composites over the reframed main stream at 0,0 via
+    # -filter_complex. Takes precedence over ``subtitles_path`` burn-in
+    # because the overlay already carries its own per-word animation.
+    overlay_video: Path | None = None
 
     def build_command(self) -> list[str]:
         cmd = [ffmpeg_bin(), "-y", "-hide_banner", "-stats", "-progress", "pipe:2"]
 
         preflight = plan_preflight(self.info, self.preset.fps)
 
+        has_overlay = bool(self.overlay_video and Path(self.overlay_video).exists())
+
+        # ---- main input
         if self.trim_start > 0:
             cmd += ["-ss", f"{self.trim_start:.3f}"]
-
         cmd += list(preflight.input_args)
         cmd += ["-i", str(self.info.path)]
-
         if self.trim_end is not None:
             duration = max(0.0, self.trim_end - self.trim_start)
             cmd += ["-t", f"{duration:.3f}"]
 
+        # ---- overlay input (second -i, with matching trim window so
+        #      its timeline lines up with the trimmed main stream)
+        if has_overlay:
+            if self.trim_start > 0:
+                cmd += ["-ss", f"{self.trim_start:.3f}"]
+            cmd += ["-i", str(self.overlay_video)]
+            if self.trim_end is not None:
+                duration = max(0.0, self.trim_end - self.trim_start)
+                cmd += ["-t", f"{duration:.3f}"]
+
+        # ---- video filter chain
+        # The overlay path renders subtitles as part of the RGBA input,
+        # so we skip the libass burn-in when an overlay is provided —
+        # double-rendering would stack two copies of the captions.
         vf = self.plan.video_filter
-        if self.burn_subtitles and self.subtitles_path and self.subtitles_path.exists():
+        if (
+            not has_overlay
+            and self.burn_subtitles
+            and self.subtitles_path
+            and Path(self.subtitles_path).exists()
+        ):
             vf = vf + "," + _subtitles_filter(
                 self.subtitles_path,
                 resolve_caption_preset(self.caption_preset_id),
                 self.preset.height,
             )
 
-        cmd += ["-vf", vf]
+        if has_overlay:
+            # -filter_complex pipeline:
+            #   [0:v] → reframe/scale chain → [base]
+            #   [base][1:v] → overlay at 0,0 (both are already at the
+            #                 target resolution) → [v]
+            # Map [v] + main audio to the output.
+            filter_complex = (
+                f"[0:v]{vf}[base];"
+                f"[base][1:v]overlay=0:0:format=auto:eof_action=pass[v]"
+            )
+            cmd += ["-filter_complex", filter_complex, "-map", "[v]"]
+            if self.info.has_audio:
+                cmd += ["-map", "0:a"]
+        else:
+            cmd += ["-vf", vf]
 
         enc = self.encoder or pick_default(codec="h264")
         if enc is None:
