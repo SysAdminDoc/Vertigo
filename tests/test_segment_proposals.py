@@ -12,6 +12,14 @@ from core.segment_proposals import (
     SegmentProposal,
     _gap_after,
     _gap_before,
+    _STOP_WORDS,
+    _STOP_WORDS_DE,
+    _STOP_WORDS_EN,
+    _STOP_WORDS_ES,
+    _STOP_WORDS_FR,
+    _STOP_WORDS_IT,
+    _STOP_WORDS_PT,
+    _token_stream,
     propose_segments,
     should_propose_for_duration,
 )
@@ -246,6 +254,54 @@ class GapHelperTests(unittest.TestCase):
                 _gap_after(t, caps, starts=starts),
                 msg=f"_gap_after divergence at t={t}",
             )
+
+    def test_stop_lists_cover_expected_languages(self) -> None:
+        """Union must carry each language's native filler words."""
+        # One high-frequency anchor per language so a future refactor
+        # that drops a list fails loudly.
+        self.assertIn("the", _STOP_WORDS_EN)
+        self.assertIn("que", _STOP_WORDS_ES)
+        self.assertIn("le", _STOP_WORDS_FR)
+        self.assertIn("der", _STOP_WORDS_DE)
+        self.assertIn("nao", _STOP_WORDS_PT)
+        self.assertIn("che", _STOP_WORDS_IT)
+        # Union is what segment_proposals actually uses.
+        for tok in ("the", "que", "le", "der", "nao", "che"):
+            self.assertIn(tok, _STOP_WORDS, msg=f"{tok!r} missing from union")
+
+    def test_english_stop_filter_still_works(self) -> None:
+        """No regression on the English path — segment_proposals was
+        English-only before this pass; the multilingual union must not
+        weaken English filtering."""
+        caps = [Caption(0.0, 2.0, "the quick brown fox")]
+        tokens = _token_stream(caps)
+        surviving = {tok for _, tok in tokens}
+        self.assertNotIn("the", surviving)
+        self.assertIn("quick", surviving)
+        self.assertIn("brown", surviving)
+        self.assertIn("fox", surviving)
+
+    def test_french_stop_filter(self) -> None:
+        """French filler gets stripped so TextTiling sees real content."""
+        caps = [Caption(0.0, 2.0, "le chat mange la souris dans la maison")]
+        tokens = _token_stream(caps)
+        surviving = {tok for _, tok in tokens}
+        # Function words dropped
+        for stop in ("le", "la", "dans"):
+            self.assertNotIn(stop, surviving, msg=f"{stop!r} should be filtered")
+        # Content words survive
+        for content in ("chat", "mange", "souris", "maison"):
+            self.assertIn(content, surviving, msg=f"{content!r} should survive")
+
+    def test_german_stop_filter(self) -> None:
+        """German filler gets stripped."""
+        caps = [Caption(0.0, 2.0, "der hund lauft in den park mit dem ball")]
+        tokens = _token_stream(caps)
+        surviving = {tok for _, tok in tokens}
+        for stop in ("der", "den", "mit", "dem"):
+            self.assertNotIn(stop, surviving, msg=f"{stop!r} should be filtered")
+        for content in ("hund", "lauft", "park", "ball"):
+            self.assertIn(content, surviving, msg=f"{content!r} should survive")
 
     def test_bisect_scales_sublinearly(self) -> None:
         """5k-caption transcript stays responsive — gap lookup is O(log n).

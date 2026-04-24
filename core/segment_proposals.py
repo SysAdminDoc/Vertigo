@@ -65,11 +65,17 @@ _BOUNDARY_VALLEY_THRESHOLD = 0.35   # Jaccard <= this flags a topic boundary
 _SILENCE_BOUNDARY_SEC = 2.5 # silence gap that promotes a boundary by itself
 
 # A deliberately small stop-list. Keeping it inline means zero network /
-# zero NLTK, and the set is stable across locales that matter for short-form.
-# Contractions like "'ll" / "'s" are intentionally omitted because the
-# tokenizer strips surrounding apostrophes and filters len<=1, so those
-# forms never reach the stop-check in the first place.
-_STOP_WORDS: frozenset[str] = frozenset(
+# zero NLTK / zero polyglot dep, and the sets are stable across the
+# locales that actually matter for short-form creators. Contractions like
+# "'ll" / "'s" are intentionally omitted because the tokenizer strips
+# surrounding apostrophes and filters len<=1, so those forms never reach
+# the stop-check in the first place.
+#
+# Each language ships as its own frozenset so native speakers reviewing
+# the list can spot-check one language at a time. `_STOP_WORDS` is the
+# union used by the tokenizer; language leaks across sets are fine (the
+# cost is a *slightly* smaller token stream, not a correctness hazard).
+_STOP_WORDS_EN: frozenset[str] = frozenset(
     """
     a an and are as at be but by for from had has have he her him his how i
     in is it its just me my no not of on or our she so than that the their
@@ -77,6 +83,67 @@ _STOP_WORDS: frozenset[str] = frozenset(
     who why will with would you your yours like do did does don doesn
     hey yeah ok okay oh uh um well right really
     """.split()
+)
+_STOP_WORDS_ES: frozenset[str] = frozenset(
+    """
+    a al algo algunos ante antes aunque como con contra cual de del desde donde
+    durante el ella ellas ellos en entre era eran es esa ese eso esta este esto
+    estaba estaban estar estos fue fueron ha habia hacia hay la las le les lo
+    los mas me mi mis mucho muy nada ni no nos nosotros o otros para pero poco
+    por porque que quien se ser si sin sobre solo son soy su sus tambien te
+    tener tengo ti todo todos tu tus un una uno unos ya yo
+    bueno vale eh este hola
+    """.split()
+)
+_STOP_WORDS_FR: frozenset[str] = frozenset(
+    """
+    a au aux avec ce ces cet cette comme dans de des du elle elles en est et
+    eu il ils j je la le les leur leurs lui mais me mes moi mon ne nos notre
+    nous on ont ou par pas pour qu que qui sa sans se ses son sont sur ta te
+    tes toi ton tous tout tu un une vos votre vous y plus fait etait bien
+    alors donc voila ben ouais ouai euh
+    """.split()
+)
+_STOP_WORDS_DE: frozenset[str] = frozenset(
+    """
+    aber als am an auch auf aus bei bin bis das dass dem den der des die doch
+    ein eine einem einen einer eines er es fur hab habe haben hat hatte ich
+    ihm ihn ihr im in ist ja kann mehr mein mich mir mit nach nicht nichts noch
+    nur ob oder sein seine sich sie sind so um und uns unsere war waren was
+    weil wenn wer werden wie wir wird wo zu zum zur
+    naja halt also genau eben mal
+    """.split()
+)
+_STOP_WORDS_PT: frozenset[str] = frozenset(
+    """
+    a ao aos as com como da das de dela delas dele deles do dos e ela elas
+    ele eles em entre era eram es essa esse essas esses esta este estas estes
+    eu foi foram ha isso isto la lhe lhes mais mas me meu meus minha minhas
+    muito na nao nas no nos nossa nossas nosso nossos num numa o os ou para
+    pela pelas pelo pelos por porque quando que quem se sem ser seu seus sim
+    sobre sua suas ta tambem te tem tinha tu tua tuas um uma umas uns voce
+    voces voce-s ai entao bom oi ne pois
+    """.split()
+)
+_STOP_WORDS_IT: frozenset[str] = frozenset(
+    """
+    a al alla alle alli allo anche c che chi ci come con contro cui da dal
+    dalla dalle dallo degli dei del della delle dello di dove e ed egli era
+    essi fu ha hai ho il in io la le lei li lo loro ma me mi mia mio ne nei
+    nel nella nelle nello noi non nostro o per piu piu' poi qualche quale
+    quando quello questo sei si sia sono su sua sue sui sul sulla suo ti tra
+    tu tua tuo un una uno voi vostro
+    bene allora dai eh bho
+    """.split()
+)
+
+_STOP_WORDS: frozenset[str] = (
+    _STOP_WORDS_EN
+    | _STOP_WORDS_ES
+    | _STOP_WORDS_FR
+    | _STOP_WORDS_DE
+    | _STOP_WORDS_PT
+    | _STOP_WORDS_IT
 )
 
 # Laughter / engagement token fingerprints.
