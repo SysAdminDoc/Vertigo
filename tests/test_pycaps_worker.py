@@ -214,6 +214,64 @@ class ControllerPycapsBranchTests(unittest.TestCase):
                 win.close()
                 win.deleteLater()
 
+    def test_pycaps_failed_without_usable_output_routes_to_failure(self) -> None:
+        """If the pycaps failure path has no surviving reframed file
+        (clip was cleared mid-export, first-run crash), the controller
+        must route through the honest failure finaliser instead of
+        reporting ``Complete`` on an empty ``Path('.')``.
+        """
+        win = self._build_window()
+        try:
+            ctl = win._ctl
+            # _pending_pycaps is cleared and no last_output_path — the
+            # fallback chain should resolve to "no usable output".
+            ctl._pending_pycaps = None
+            ctl.last_output_path = None
+            ctl._on_pycaps_failed("RuntimeError: first-run crash")
+
+            # Failure path must not claim "Complete"; _set_export_status
+            # should read "Export failed" per _on_export_fail. We check
+            # that last_output_path was not overwritten with Path('.').
+            self.assertNotEqual(ctl.last_output_path, Path())
+            self.assertNotEqual(ctl.last_output_path, Path("."))
+            self.assertIsNone(ctl._pending_pycaps)
+        finally:
+            win.close()
+            win.deleteLater()
+
+
+class BatchQueueClearTests(unittest.TestCase):
+    """``BatchQueue.clear()`` must emit ``entry_removed`` per-id so the
+    controller's per-clip cleanup (``drop_clip_subs``) runs on the
+    toolbar's Clear action too — not just on individual deletes.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+        cls._app = QApplication.instance() or QApplication(sys.argv)
+
+    def test_clear_emits_entry_removed_for_every_id(self) -> None:
+        from ui.batch_queue import BatchQueue
+
+        q = BatchQueue()
+        removed: list[int] = []
+        q.entry_removed.connect(removed.append)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(3):
+                p = Path(tmp) / f"clip{i}.mp4"
+                p.write_bytes(b"")
+                q.add(p)
+            ids = [e.id for e in q.entries()]
+            self.assertEqual(len(ids), 3)
+
+            q.clear()
+
+            self.assertEqual(q.count(), 0)
+            self.assertEqual(sorted(removed), sorted(ids))
+
 
 if __name__ == "__main__":
     unittest.main()

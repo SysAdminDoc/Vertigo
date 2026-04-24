@@ -227,7 +227,14 @@ class MainController(QObject):
                 path.unlink(missing_ok=True)
             except Exception:
                 pass
+        # Drop the cached caption list too, otherwise downstream consumers
+        # (segment proposals, pycaps) keep operating on transcripts the
+        # user just asked us to forget.
+        if current:
+            self.clip_captions.pop(current.id, None)
+            self.animated_styles.pop(current.id, None)
         self.win._refresh_overview()
+        self.refresh_segments_button()
 
     def run_transcribe(
         self,
@@ -402,6 +409,7 @@ class MainController(QObject):
         worker.start()
 
     def _on_tighten_ready(self, low: float, high: float, coverage: float) -> None:
+        self.vad_worker = None
         w = self.win
         w._player.set_trim_range(low, high)
         # _on_trim_changed fires from the scrubber already; we still
@@ -419,6 +427,7 @@ class MainController(QObject):
         w._player.tighten_btn.setEnabled(True)
 
     def _on_tighten_failed(self, msg: str) -> None:
+        self.vad_worker = None
         w = self.win
         w._player.tighten_btn.setEnabled(True)
         if msg == "Cancelled.":
@@ -451,6 +460,7 @@ class MainController(QObject):
         worker.start()
 
     def _on_highlights_ready(self, highlights: list) -> None:
+        self.highlights_worker = None
         w = self.win
         w._player.highlights_btn.setEnabled(True)
         if not highlights:
@@ -462,6 +472,7 @@ class MainController(QObject):
         self._present_highlights_menu(highlights)
 
     def _on_highlights_failed(self, msg: str) -> None:
+        self.highlights_worker = None
         w = self.win
         w._player.highlights_btn.setEnabled(True)
         if msg == "Cancelled.":
@@ -672,6 +683,7 @@ class MainController(QObject):
         worker.start()
 
     def _on_trim_silences_ready(self, spans: list) -> None:
+        self.auto_edit_worker = None
         w = self.win
         w._player.trim_silences_btn.setEnabled(True)
         if not spans:
@@ -689,6 +701,7 @@ class MainController(QObject):
         self._present_trim_silence_menu(spans_ranked)
 
     def _on_trim_silences_failed(self, msg: str) -> None:
+        self.auto_edit_worker = None
         w = self.win
         w._player.trim_silences_btn.setEnabled(True)
         if msg == "Cancelled.":
@@ -1146,6 +1159,7 @@ class MainController(QObject):
 
     def _on_pycaps_done(self, tmp_out_str: str) -> None:
         """Swap the pycaps output into place and finalise the export."""
+        self.pycaps_worker = None
         ctx = self._pending_pycaps or {}
         self._pending_pycaps = None
         reframed_out: Path = ctx.get("reframed_out") or Path(tmp_out_str)
@@ -1166,23 +1180,51 @@ class MainController(QObject):
         self._finish_export_done(final_path, entry_id)
 
     def _on_pycaps_failed(self, msg: str) -> None:
-        """Fall back to the reframed export without animated captions."""
+        """Fall back to the reframed export without animated captions.
+
+        Safe when the user has already cleared the clip mid-export:
+        ``self.win._info`` may be ``None`` on re-entry, so the fallback
+        for ``reframed_out`` never dereferences it — we prefer the
+        pending context, then the tmp path, then the last-known
+        output. If none of those resolves to a file that actually
+        exists we route through the failure finaliser so the UI
+        doesn't falsely report ``Complete`` with an empty filename.
+        """
+        self.pycaps_worker = None
         ctx = self._pending_pycaps or {}
         self._pending_pycaps = None
-        reframed_out: Path = ctx.get("reframed_out") or self.win._info.path  # type: ignore[union-attr]
-        tmp_out: Path = ctx.get("tmp_out") or reframed_out
+        tmp_out_val = ctx.get("tmp_out")
+        reframed_val = (
+            ctx.get("reframed_out")
+            or tmp_out_val
+            or self.last_output_path
+        )
+        reframed_out: Path | None = Path(reframed_val) if reframed_val else None
+        tmp_out: Path | None = Path(tmp_out_val) if tmp_out_val else reframed_out
         entry_id = ctx.get("entry_id")
 
         # Always scrub the partial pycaps output so the user doesn't see
         # a truncated sibling file next to their export.
-        try:
-            tmp_out.unlink(missing_ok=True)
-        except Exception:
-            pass
+        if tmp_out is not None:
+            try:
+                tmp_out.unlink(missing_ok=True)
+            except Exception:
+                pass
 
         cancelled = msg == "Cancelled."
+
+        # No usable reframed file means pycaps failed before the main
+        # encode produced anything — route through the honest-failure
+        # path rather than claim "Complete" on an empty ``Path('.')``.
+        usable = reframed_out is not None and reframed_out.exists()
+        if not usable:
+            reason = "Cancelled." if cancelled else f"{msg} (no reframed output to fall back to)"
+            self._append_log(f"[pycaps error] {reason}")
+            self._on_export_fail(reason, entry_id)
+            return
+
         if cancelled:
-            self._append_log("[pycaps] Cancelled — kept reframed export.")
+            self._append_log("[pycaps] Cancelled \u2014 kept reframed export.")
         else:
             self._append_log(f"[pycaps error] {msg}")
             self.win._toast.show_toast(

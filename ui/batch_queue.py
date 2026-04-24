@@ -292,6 +292,15 @@ class BatchQueue(QWidget):
         return len(self._entries)
 
     def clear(self) -> None:
+        """Remove every queue entry and emit ``entry_removed`` per id.
+
+        Emitting per-entry keeps the controller's per-clip cleanup hook
+        (``drop_clip_subs``) in the driver's seat for every removal
+        path — otherwise a "Clear queue" click would silently leak the
+        cached SRT/ASS files and the ``clip_captions`` /
+        ``animated_styles`` dicts referenced by those ids.
+        """
+        removed_ids = [e.id for e in self._entries]
         for item in self._items.values():
             item.setParent(None)
             item.deleteLater()
@@ -299,6 +308,8 @@ class BatchQueue(QWidget):
         self._entries.clear()
         self._selected_id = None
         self._refresh_empty_state()
+        for eid in removed_ids:
+            self.entry_removed.emit(eid)
 
     # ---------------------------------------------- slots
     def _on_item_selected(self, entry_id: int) -> None:
