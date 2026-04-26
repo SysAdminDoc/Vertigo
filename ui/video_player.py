@@ -6,6 +6,7 @@ the live crop viewport for the selected reframe mode.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QRectF, QSize, Qt, QUrl, pyqtSignal
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -234,6 +236,140 @@ class PreviewCanvas(QWidget):
         self.update()
 
 
+@dataclass(frozen=True)
+class SegmentBand:
+    """Duration band used by the local segment-proposal worker."""
+
+    min_sec: float = 30.0
+    max_sec: float = 90.0
+    target_sec: float = 45.0
+
+
+class SegmentSettingsBar(QWidget):
+    """Compact sliders for long-form segment proposal length."""
+
+    changed = pyqtSignal(object)  # SegmentBand
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._band = SegmentBand()
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 0)
+        lay.setSpacing(8)
+
+        self._summary = QLabel("")
+        self._summary.setObjectName("valueMuted")
+        self._summary.setWordWrap(False)
+        self._summary.setMinimumWidth(174)
+        lay.addWidget(self._summary)
+
+        self._min = self._slider(
+            15, 90, int(self._band.min_sec), "Minimum segment length"
+        )
+        self._target = self._slider(
+            15, 180, int(self._band.target_sec), "Target segment length"
+        )
+        self._max = self._slider(
+            45, 180, int(self._band.max_sec), "Maximum segment length"
+        )
+
+        self._min_v = self._value_label()
+        self._target_v = self._value_label()
+        self._max_v = self._value_label()
+
+        self._add_control(lay, "Min", self._min, self._min_v)
+        self._add_control(lay, "Target", self._target, self._target_v)
+        self._add_control(lay, "Max", self._max, self._max_v)
+
+        self._min.valueChanged.connect(self._recompute)
+        self._target.valueChanged.connect(self._recompute)
+        self._max.valueChanged.connect(self._recompute)
+        self._recompute()
+
+    def band(self) -> SegmentBand:
+        return self._band
+
+    def set_band(self, min_sec: float, max_sec: float, target_sec: float) -> None:
+        min_i = int(round(max(15.0, min(90.0, min_sec))))
+        max_i = int(round(max(45.0, min(180.0, max_sec))))
+        if max_i <= min_i:
+            max_i = min(180, min_i + 5)
+            if max_i <= min_i:
+                min_i = max(15, max_i - 5)
+        target_i = int(round(max(min_i, min(max_i, target_sec))))
+
+        self._set_slider_value(self._min, min_i)
+        self._set_slider_value(self._max, max_i)
+        self._target.setRange(min_i, max_i)
+        self._set_slider_value(self._target, target_i)
+        self._recompute()
+
+    def _slider(self, lo: int, hi: int, default: int, name: str) -> QSlider:
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(lo, hi)
+        slider.setValue(default)
+        slider.setSingleStep(5)
+        slider.setPageStep(15)
+        slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        slider.setToolTip(name)
+        slider.setAccessibleName(name)
+        slider.setMinimumWidth(80)
+        return slider
+
+    def _value_label(self) -> QLabel:
+        label = QLabel("")
+        label.setObjectName("formValue")
+        label.setFixedWidth(48)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return label
+
+    def _add_control(
+        self,
+        lay: QHBoxLayout,
+        title: str,
+        slider: QSlider,
+        value: QLabel,
+    ) -> None:
+        label = QLabel(title)
+        label.setObjectName("formLabel")
+        lay.addWidget(label)
+        lay.addWidget(slider, 1)
+        lay.addWidget(value)
+
+    def _set_slider_value(self, slider: QSlider, value: int) -> None:
+        old = slider.blockSignals(True)
+        slider.setValue(value)
+        slider.blockSignals(old)
+
+    def _recompute(self) -> None:
+        min_v = int(self._min.value())
+        max_v = int(self._max.value())
+        if max_v <= min_v:
+            sender = self.sender()
+            if sender is self._min:
+                max_v = min(180, min_v + 5)
+                self._set_slider_value(self._max, max_v)
+            else:
+                min_v = max(15, max_v - 5)
+                self._set_slider_value(self._min, min_v)
+
+        self._target.setRange(min_v, max_v)
+        target_v = int(max(min_v, min(max_v, self._target.value())))
+        self._set_slider_value(self._target, target_v)
+
+        self._band = SegmentBand(float(min_v), float(max_v), float(target_v))
+        self._min_v.setText(_fmt(min_v))
+        self._target_v.setText(_fmt(target_v))
+        self._max_v.setText(_fmt(max_v))
+        self._summary.setText(
+            f"Segments {_fmt(min_v)}–{_fmt(max_v)} · target {_fmt(target_v)}"
+        )
+        self.setAccessibleName("Segment proposal length settings")
+        self.setAccessibleDescription(self._summary.text())
+        self.changed.emit(self._band)
+
+
 class VideoPlayer(QWidget):
     """Media player widget wrapping a canvas + transport + trim scrubber."""
 
@@ -339,12 +475,15 @@ class VideoPlayer(QWidget):
         trim_row.addWidget(self.trim_silences_btn)
         trim_row.addWidget(self.tighten_btn)
 
+        self._segment_settings = SegmentSettingsBar()
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
         lay.addWidget(self.canvas, 1)
         lay.addLayout(transport)
         lay.addLayout(trim_row)
+        lay.addWidget(self._segment_settings)
         lay.addWidget(self._trim_hint)
 
     # public API -------------------------------------------------------
@@ -442,6 +581,13 @@ class VideoPlayer(QWidget):
     def set_shot_boundaries(self, boundaries: list[float]) -> None:
         """Forward scene cuts to the scrubber for tick drawing + snap."""
         self._scrubber.set_shot_boundaries(boundaries)
+
+    def segment_band(self) -> tuple[float, float, float]:
+        band = self._segment_settings.band()
+        return band.min_sec, band.max_sec, band.target_sec
+
+    def set_segment_band(self, min_sec: float, max_sec: float, target_sec: float) -> None:
+        self._segment_settings.set_band(min_sec, max_sec, target_sec)
 
     def trim_range(self) -> tuple[float, float]:
         return self._scrubber.low(), self._scrubber.high()

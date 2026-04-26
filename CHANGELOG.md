@@ -4,6 +4,15 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Segment proposal duration controls.** The preview trim tool now exposes
+  min / target / max sliders for Suggest segments, and the controller passes
+  that band into `SegmentProposalsWorker` instead of hard-coding 30-90 s /
+  45 s. The popup menu and toast echo the active band so candidate lists are
+  easier to trust.
+- **Regression coverage.** `test_main_window_smoke.py` now checks the segment
+  band defaults, UI setters, and worker kwargs. Added `pytest.ini` so
+  `pytest-qt` consistently selects PyQt6 when PySide6 is also installed.
+
 ## [0.12.3] - 2026-04-24
 
 ### Iter 1 — polish + perf (Tier 8)

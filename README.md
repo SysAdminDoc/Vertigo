@@ -28,7 +28,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Platform presets** — YouTube Shorts, TikTok, Instagram Reels, Square (1:1). One click switches output geometry and encoder target bitrate.
 - **Batch queue** — drop many clips at once, preview any one, then **Export All** to a folder. Per-item status indicator.
 - **Trim timeline** — dual-thumb in/out range slider directly on the preview. Exports respect the trim window via FFmpeg `-ss` / `-t`.
-- **Four one-click trim helpers** — *Suggest segments* (TextTiling-ranked 30-90 s candidates on clips > 10 min; **requires AI captions to be generated first** so the segmenter has a transcript to work with — **new in v0.12.0**), *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
+- **Four one-click trim helpers** — *Suggest segments* (TextTiling-ranked candidates on clips > 10 min, now with min / target / max length sliders; **requires AI captions to be generated first** so the segmenter has a transcript to work with), *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
 - **Export thumbnails** — one-click save of six representative PNG cover frames (Katna-ranked when installed, evenly-spaced cv2 frames otherwise).
 - **Adjustments panel** — live brightness / contrast / saturation sliders; applied via FFmpeg `eq=` filter appended to the reframe chain.
 - **Scene detection** — PySceneDetect (with a histogram-delta fallback) segments the timeline to stabilize Smart Track.
@@ -99,6 +99,7 @@ sudo apt install ffmpeg
 vertigo.py                entry + dependency bootstrap + PyInstaller freeze-support
 vertigo.spec              PyInstaller build spec (single-file, per-OS icon)
 .github/workflows/build.yml  Multi-OS CI + GitHub Release upload
+pytest.ini                pytest-qt binding pin (PyQt6)
 core/
   _lazy.py                shared pip-install helper with frozen-build guard + threading.Lock
   caption_types.py        Caption + Word dataclasses (lifted from subtitles for clean imports)
@@ -174,6 +175,14 @@ assets/
 | Smart Track | `crop=...:x=<piecewise lerp>,scale` | Talking heads, walking subjects |
 | Blur Letterbox | `split, blur+crop bg, scale fg, overlay` | Preserve full frame, no loss |
 | Manual | `crop` with locked offset | Total creative control |
+
+## Test
+
+```bash
+python -m pytest -q
+```
+
+`pytest.ini` pins `pytest-qt` to PyQt6 so local environments that also have PySide6 installed still exercise the shipped widget stack.
 
 ## Build binaries
 

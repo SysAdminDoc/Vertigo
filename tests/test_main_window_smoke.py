@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class MainWindowSmokeTests(unittest.TestCase):
@@ -64,10 +65,86 @@ class MainWindowSmokeTests(unittest.TestCase):
                 for theme_id in ("mocha", "graphite", "latte"):
                     win._apply_theme(theme_id, persist=False)
 
+                self.assertEqual(win._player.segment_band(), (30.0, 90.0, 45.0))
+                win._player.set_segment_band(25.0, 120.0, 60.0)
+                self.assertEqual(win._player.segment_band(), (25.0, 120.0, 60.0))
+
                 # Exercise the full clear path (confirm=False skips the
                 # modal that would otherwise hang offscreen tests).
                 win._clear_queue(confirm=False)
                 self.assertEqual(win._queue.count(), 0)
+            finally:
+                win.close()
+                win.deleteLater()
+
+    def test_segment_band_settings_feed_worker_kwargs(self) -> None:
+        from core.caption_types import Caption
+        from core.probe import VideoInfo
+        from ui.batch_queue import QueueEntry
+        import ui.main_controller as main_controller
+        from ui.main_window import MainWindow
+
+        class FakeSignal:
+            def __init__(self) -> None:
+                self.slots = []
+
+            def connect(self, slot) -> None:
+                self.slots.append(slot)
+
+        class FakeSegmentWorker:
+            instances = []
+
+            def __init__(self, captions, *, min_sec, max_sec, target_sec, top_n=8):
+                self.captions = captions
+                self.min_sec = min_sec
+                self.max_sec = max_sec
+                self.target_sec = target_sec
+                self.top_n = top_n
+                self.finished_ok = FakeSignal()
+                self.failed = FakeSignal()
+                FakeSegmentWorker.instances.append(self)
+
+            def start(self) -> None:
+                pass
+
+            def isRunning(self) -> bool:
+                return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_clip = Path(tmp) / "long.mp4"
+            fake_clip.write_bytes(b"")
+
+            win = MainWindow()
+            try:
+                entry = QueueEntry(path=fake_clip)
+                win._current_entry = entry
+                win._info = VideoInfo(
+                    path=fake_clip,
+                    width=1920,
+                    height=1080,
+                    duration=900.0,
+                    fps=30.0,
+                    codec="h264",
+                    has_audio=True,
+                    audio_codec="aac",
+                )
+                win._player.set_segment_band(25.0, 120.0, 60.0)
+                win._ctl._set_cached_captions(
+                    entry.id,
+                    [Caption(0.0, 4.0, "Can this make a useful short?")],
+                )
+
+                with patch.object(
+                    main_controller, "SegmentProposalsWorker", FakeSegmentWorker
+                ):
+                    win._ctl.run_suggest_segments()
+
+                self.assertEqual(len(FakeSegmentWorker.instances), 1)
+                worker = FakeSegmentWorker.instances[0]
+                self.assertEqual(worker.min_sec, 25.0)
+                self.assertEqual(worker.max_sec, 120.0)
+                self.assertEqual(worker.target_sec, 60.0)
+                self.assertEqual(worker.top_n, 8)
             finally:
                 win.close()
                 win.deleteLater()

@@ -82,6 +82,13 @@ def _fmt_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def _fmt_segment_band(min_sec: float, max_sec: float, target_sec: float) -> str:
+    return (
+        f"{_fmt_duration(min_sec)}–{_fmt_duration(max_sec)}"
+        f" · target {_fmt_duration(target_sec)}"
+    )
+
+
 class MainController(QObject):
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
@@ -568,11 +575,13 @@ class MainController(QObject):
         # UI refresh (hot path: called on queue change, subs clear,
         # subs ready, trim change, duration probe).
         has_captions = bool(entry) and self._captions_has_text.get(entry.id, False)
+        min_sec, max_sec, target_sec = w._player.segment_band()
+        band = _fmt_segment_band(min_sec, max_sec, target_sec)
         btn.setEnabled(has_long_clip and has_captions)
         if has_long_clip and not has_captions:
             btn.setToolTip(
                 "Generate AI captions in the Subtitles tab first \u2014 segment "
-                "proposals read from the cached transcript."
+                f"proposals read from the cached transcript. Current band: {band}."
             )
         elif not has_long_clip and info:
             btn.setToolTip(
@@ -580,7 +589,7 @@ class MainController(QObject):
             )
         else:
             btn.setToolTip(
-                "Split long clips (> 10 min) into candidate 30\u201390 s segments "
+                f"Split long clips (> 10 min) into {band} segments "
                 "using local TextTiling on the cached transcript. Pick a "
                 "segment to drop the trim on it."
             )
@@ -612,9 +621,16 @@ class MainController(QObject):
             )
             return
 
-        w._toast.show_toast("Scanning transcript for segments\u2026", kind="info")
+        min_sec, max_sec, target_sec = w._player.segment_band()
+        band = _fmt_segment_band(min_sec, max_sec, target_sec)
+        w._toast.show_toast(f"Scanning transcript for {band} segments\u2026", kind="info")
         w._player.segments_btn.setEnabled(False)
-        worker = SegmentProposalsWorker(captions=list(captions))
+        worker = SegmentProposalsWorker(
+            captions=list(captions),
+            min_sec=min_sec,
+            max_sec=max_sec,
+            target_sec=target_sec,
+        )
         worker.finished_ok.connect(self._on_segments_ready)
         worker.failed.connect(self._on_segments_failed)
         self.segments_worker = worker
@@ -644,6 +660,12 @@ class MainController(QObject):
         w = self.win
         menu = QMenu(w)
         menu.setAccessibleName("Candidate segments")
+        min_sec, max_sec, target_sec = w._player.segment_band()
+        band_action = menu.addAction(
+            f"Length {_fmt_segment_band(min_sec, max_sec, target_sec)}"
+        )
+        band_action.setEnabled(False)
+        menu.addSeparator()
         for p in proposals:
             label = self._format_segment_label(p)
             action = menu.addAction(label)

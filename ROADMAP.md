@@ -227,6 +227,24 @@ never the latter.
   Deliberately ignored the `librosa + silero-vad` suggestion — no
   need for torch just to RMS a 3-second window.
 
+## Tier 10 · v0.13 product polish pass
+
+- [x] **R9 · Segment proposal duration controls** · v0.13-dev
+  Preview now exposes min / target / max length sliders for Suggest
+  segments. The selected band is passed into `SegmentProposalsWorker`,
+  echoed in the running toast and candidate menu, and covered by a UI
+  smoke regression. `pytest.ini` now pins `pytest-qt` to PyQt6 so the
+  smoke test loads the shipped binding even on machines that also have
+  PySide6. This borrows the useful duration-preset idea from
+  long-form-to-shorts tools without adding cloud scoring or network
+  dependencies.
+
+- [ ] **R10 · Worker-output scrub parity audit** · next pass
+  Re-check `subtitle_worker`, `highlights_worker`, and
+  `auto_edit_worker` for partial-output cleanup parity with
+  `encode_worker` / `pycaps_worker`, especially cancel and exception
+  branches that could leave temp files next to user exports.
+
 ---
 
 ## Tier 4 · Power-user opt-in [gated behind toggles]
