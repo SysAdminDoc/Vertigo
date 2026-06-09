@@ -78,3 +78,11 @@ models/
 *.onnx
 *.pt
 .factory/
+
+# Markdown files local-only (except README)
+*.md
+!README.md
+
+# Markdown files local-only (except README)
+*.md
+!README.md
