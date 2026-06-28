@@ -86,3 +86,11 @@ models/
 # Markdown files local-only (except README)
 *.md
 !README.md
+
+# AI config
+AGENTS.md
+.claude/
+.codex/
+.ai/
+PROJECT_CONTEXT.md
+CONTINUATION_PROMPT.md
