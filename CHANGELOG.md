@@ -2,7 +2,7 @@
 
 All notable changes to Vertigo are documented here.
 
-## [Unreleased]
+## [0.12.4] - 2026-08-12
 
 - **Opt-in person/object Smart Track fallback.** The Track panel can now use
   OpenCV's built-in HOG person detector and bounded motion contours when face
