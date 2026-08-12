@@ -104,6 +104,7 @@ class SubtitlesPanel(QWidget):
         model_lbl = QLabel("Model")
         model_lbl.setObjectName("formLabel")
         self._model = QComboBox()
+        self._model.setAccessibleName("Caption transcription model")
         self._model.setCursor(Qt.CursorShape.PointingHandCursor)
         self._model.setToolTip("Larger models transcribe more accurately but take longer and use more RAM.")
         for name in AVAILABLE_MODELS:
@@ -117,6 +118,7 @@ class SubtitlesPanel(QWidget):
         lang_lbl = QLabel("Language")
         lang_lbl.setObjectName("formLabel")
         self._language = QComboBox()
+        self._language.setAccessibleName("Caption transcription language")
         self._language.setCursor(Qt.CursorShape.PointingHandCursor)
         for code, name in _LANGUAGES:
             self._language.addItem(name, code)
@@ -126,6 +128,7 @@ class SubtitlesPanel(QWidget):
         style_lbl = QLabel("Style")
         style_lbl.setObjectName("formLabel")
         self._preset_combo = QComboBox()
+        self._preset_combo.setAccessibleName("Caption style preset")
         self._preset_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._preset_combo.setToolTip("Preset look for burned-in captions")
         for preset in CAPTION_PRESETS.values():
@@ -291,6 +294,7 @@ class SubtitlesPanel(QWidget):
         self._transcribe_btn = QPushButton("Generate captions")
         self._transcribe_btn.setObjectName("primaryBtn")
         self._transcribe_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._transcribe_btn.setAccessibleName("Generate captions")
         self._transcribe_btn.setToolTip("Transcribe the current clip and save an SRT alongside it")
         self._transcribe_btn.setEnabled(False)
         self._transcribe_btn.clicked.connect(self._emit_transcribe)
@@ -298,6 +302,7 @@ class SubtitlesPanel(QWidget):
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setObjectName("ghostBtn")
         self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_btn.setAccessibleName("Clear generated captions")
         self._clear_btn.setToolTip("Discard captions generated for this clip")
         self._clear_btn.setEnabled(False)
         self._clear_btn.clicked.connect(self._on_clear)

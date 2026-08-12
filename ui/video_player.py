@@ -291,6 +291,7 @@ class SegmentSettingsBar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._band = SegmentBand()
 
         lay = QHBoxLayout(self)
@@ -418,6 +419,7 @@ class VideoPlayer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAccessibleName("Video preview player")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.canvas = PreviewCanvas(self)
         self.canvas.setFocusProxy(self)

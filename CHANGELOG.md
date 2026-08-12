@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Accessible PyQt surface.** Interactive controls across the preview, export,
+  captions, overlays, queue, and output panels now expose stable accessible
+  names; the live workspace smoke test also checks focusability, dynamic rows,
+  and custom preview controls while the existing reduced-motion test remains in
+  the suite.
 - **Local packaging contract.** README and the PyInstaller spec now describe a
   local-only release flow. `scripts/release_sanity.py` checks synchronized
   version strings, required bundle assets, critical hidden imports, and the

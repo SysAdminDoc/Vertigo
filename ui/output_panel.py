@@ -100,6 +100,7 @@ class OutputPanel(QWidget):
             btn.setObjectName("presetChip")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setAccessibleName(f"Set output quality to {label.lower()}")
             btn.setMinimumHeight(30)
             btn.setToolTip(f"Set quality to {value}")
             btn.clicked.connect(lambda _=False, v=value: self._quality.setValue(v))

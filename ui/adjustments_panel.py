@@ -48,6 +48,7 @@ class AdjustmentsPanel(QWidget):
         self._reset = QPushButton("Reset")
         self._reset.setObjectName("ghostBtn")
         self._reset.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._reset.setAccessibleName("Reset image adjustments")
         self._reset.setToolTip("Return adjustments to neutral")
         self._reset.clicked.connect(self.reset)
         reset_row.addWidget(self._reset)
