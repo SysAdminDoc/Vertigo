@@ -1,6 +1,6 @@
 # PyInstaller spec — Vertigo single-file build.
 # Build:
-#   pyinstaller --clean vertigo.spec
+#   py -3.12 -m PyInstaller --clean --noconfirm vertigo.spec
 # Output:
 #   dist/Vertigo.exe                (Windows)
 #   dist/Vertigo / Vertigo.app      (Linux / macOS)

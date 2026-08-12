@@ -44,7 +44,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Live crop viewport** overlaid on the preview player so you see the target frame before rendering.
 - **Async FFmpeg encoding** with real-time progress bar and a scrolling log panel.
 - **Turnkey bootstrap** — single-command launch, auto-installs missing Python deps on first run.
-- **Binary builds** — `pyinstaller --clean vertigo.spec` produces single-file Windows, macOS `.app`, and Linux exes. GitHub Actions workflow builds all three on every tag push (or `workflow_dispatch`) and uploads to a draft release via `gh release upload --clobber`.
+- **Local binary builds** — `py -3.12 -m PyInstaller --clean --noconfirm vertigo.spec` produces a single-file Windows executable, macOS `.app`, or Linux executable. `py -3.12 scripts/release_sanity.py --artifact` checks version strings, required assets, hidden imports, and the built artifact without relying on a CI service.
 
 ## Optional integrations
 
@@ -104,7 +104,7 @@ sudo apt install ffmpeg
 ```
 vertigo.py                entry + dependency bootstrap + PyInstaller freeze-support
 vertigo.spec              PyInstaller build spec (single-file, per-OS icon)
-.github/workflows/build.yml  Multi-OS CI + GitHub Release upload
+scripts/release_sanity.py  Local version / asset / hidden-import / artifact contract
 pytest.ini                pytest-qt binding pin (PyQt6)
 core/
   _lazy.py                shared pip-install helper with frozen-build guard + threading.Lock
@@ -197,14 +197,18 @@ python -m pytest -q
 ## Build binaries
 
 ```bash
-pip install pyinstaller
-pyinstaller --clean vertigo.spec
+py -3.12 -m pip install pyinstaller
+py -3.12 scripts/release_sanity.py
+py -3.12 -m PyInstaller --clean --noconfirm vertigo.spec
+py -3.12 scripts/release_sanity.py --artifact
 # dist/Vertigo.exe   (Windows)
 # dist/Vertigo.app   (macOS)
 # dist/Vertigo       (Linux)
 ```
 
-Or push a tag and let CI build all three — see `.github/workflows/build.yml`. A `workflow_dispatch` run with a tag input lands three artifacts on a draft release.
+Packaging is intentionally local: run the sanity command before and after the
+PyInstaller build, then attach the platform artifact using the release process
+your team already uses.
 
 ## Requirements
 

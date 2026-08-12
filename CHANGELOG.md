@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Local packaging contract.** README and the PyInstaller spec now describe a
+  local-only release flow. `scripts/release_sanity.py` checks synchronized
+  version strings, required bundle assets, critical hidden imports, and the
+  expected artifact path before or after a fresh build; the stale GitHub
+  Actions release language is gone.
 - **Local multi-preset export matrix.** The Platform Preset panel can now
   select multiple delivery targets for a clip or queue. Each source remains a
   single queue item while child exports write deterministic

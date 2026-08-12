@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P2 - Refresh local packaging and release sanity checks
-  Why: `.github/` workflows were removed but README still describes CI release uploads, and PyInstaller/PyQt/OpenCV/MediaPipe releases have moved since the current docs and dependency floors.
-  Evidence: `git log -10`; `README.md`; `vertigo.spec`; PyInstaller changelog; PyQt6/PyQt6-Qt6 PyPI; opencv-python PyPI; mediapipe PyPI.
-  Touches: `README.md`, `CHANGELOG.md`, `vertigo.spec`, `requirements.txt`, local release scripts or non-markdown checklist, `tests/`.
-  Acceptance: Docs describe local-only builds, a local sanity command verifies PyInstaller spec version/assets/hidden imports, and a fresh artifact build no longer depends on GitHub Actions.
-  Complexity: M
-
 - [ ] P2 - Add accessibility coverage for the full PyQt surface
   Why: Vertigo has accessible names on many controls, but there is no test that every interactive control in the current workspace has a usable accessible name, focus policy, and reduced-motion behavior.
   Evidence: `ui/video_player.py`; `ui/subtitles_panel.py`; `ui/output_panel.py`; `ui/titlebar.py`; `tests/test_theme_tokens.py`; `tests/test_main_window_smoke.py`.
