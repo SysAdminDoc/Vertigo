@@ -8,6 +8,7 @@ from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QCloseEvent, QFontMetrics
 from PyQt6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -417,6 +418,37 @@ class MainWindow(QMainWindow):
         self._preset_detail.setWordWrap(True)
         panel.layout().addWidget(self._preset_detail)
 
+        self._matrix_toggle = QCheckBox("Export a local preset matrix")
+        self._matrix_toggle.setAccessibleName("Toggle multi-preset export matrix")
+        self._matrix_toggle.setToolTip(
+            "Write one local MP4 per checked platform preset for the current clip or queue."
+        )
+        self._matrix_toggle.toggled.connect(self._on_matrix_toggle)
+        panel.layout().addWidget(self._matrix_toggle)
+
+        matrix_label = QLabel("Matrix presets")
+        matrix_label.setObjectName("formLabel")
+        panel.layout().addWidget(matrix_label)
+        matrix_grid = QGridLayout()
+        matrix_grid.setHorizontalSpacing(8)
+        matrix_grid.setVerticalSpacing(4)
+        self._matrix_checks: dict[str, QCheckBox] = {}
+        for index, (pid, preset) in enumerate(PRESETS.items()):
+            check = QCheckBox(preset.label)
+            check.setObjectName(f"matrixPreset_{pid}")
+            check.setAccessibleName(f"Include {preset.label} in export matrix")
+            check.setToolTip(f"Include a {preset.label} MP4 in the local matrix")
+            check.toggled.connect(self._refresh_matrix_hint)
+            self._matrix_checks[pid] = check
+            matrix_grid.addWidget(check, index // 2, index % 2)
+        panel.layout().addLayout(matrix_grid)
+        self._matrix_hint = QLabel("")
+        self._matrix_hint.setObjectName("valueMuted")
+        self._matrix_hint.setWordWrap(True)
+        panel.layout().addWidget(self._matrix_hint)
+        self._matrix_checks["shorts"].setChecked(True)
+        self._refresh_matrix_hint()
+
         self._platform_notice = QLabel("")
         self._platform_notice.setObjectName("inlineNotice")
         self._platform_notice.setWordWrap(True)
@@ -692,9 +724,57 @@ class MainWindow(QMainWindow):
     # --------------------------------------------- preset
     def _choose_preset(self, pid: str) -> None:
         self._preset = PRESETS[pid]
+        if hasattr(self, "_matrix_checks") and not self._matrix_toggle.isChecked():
+            for matrix_pid, check in self._matrix_checks.items():
+                blocked = check.blockSignals(True)
+                check.setChecked(matrix_pid == pid)
+                check.blockSignals(blocked)
+            self._refresh_matrix_hint()
         self._update_preset_ui()
         self._player.set_aspect(self._preset.width, self._preset.height)
         self._refresh_platform_notice()
+
+    def matrix_enabled(self) -> bool:
+        return bool(getattr(self, "_matrix_toggle", None) and self._matrix_toggle.isChecked())
+
+    def matrix_preset_ids(self) -> list[str]:
+        if not self.matrix_enabled():
+            return [self._preset.id]
+        selected = [
+            pid for pid in PRESETS if self._matrix_checks.get(pid) is not None
+            and self._matrix_checks[pid].isChecked()
+        ]
+        return selected or [self._preset.id]
+
+    def set_matrix_preset_ids(self, preset_ids: list[str] | tuple[str, ...]) -> None:
+        wanted = {pid for pid in preset_ids if pid in PRESETS}
+        if not wanted:
+            wanted = {self._preset.id}
+        for pid, check in self._matrix_checks.items():
+            blocked = check.blockSignals(True)
+            check.setChecked(pid in wanted)
+            check.blockSignals(blocked)
+        self._refresh_matrix_hint()
+
+    def _on_matrix_toggle(self, enabled: bool) -> None:
+        if enabled and not self.matrix_preset_ids():
+            self._matrix_checks[self._preset.id].setChecked(True)
+        self._refresh_matrix_hint()
+
+    def _refresh_matrix_hint(self, *_args) -> None:
+        if not hasattr(self, "_matrix_hint"):
+            return
+        selected = [PRESETS[pid].label for pid in self.matrix_preset_ids()]
+        if self.matrix_enabled() and len(selected) > 1:
+            self._matrix_hint.setText(
+                "Matrix export will write " + ", ".join(selected) + " as separate MP4 files."
+            )
+        elif self.matrix_enabled():
+            self._matrix_hint.setText(
+                "Check at least two presets to produce a matrix; one checked preset uses the normal export flow."
+            )
+        else:
+            self._matrix_hint.setText("Matrix export is off. The active platform preset controls the next export.")
 
     def _update_preset_ui(self) -> None:
         p = self._preset

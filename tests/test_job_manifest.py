@@ -55,6 +55,36 @@ class JobManifestTests(unittest.TestCase):
             self.assertEqual(loaded.entries[0].temp_output_path, entry.temp_output_path)
             self.assertFalse(manifest_path.with_suffix(".json.tmp").exists())
 
+    def test_manifest_round_trips_matrix_children(self) -> None:
+        from core.job_manifest import BatchManifest, ManifestEntry, load, save
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "matrix.json"
+            original = BatchManifest.new(
+                output_dir=Path(tmp) / "exports",
+                preset_id="shorts",
+                mode="center",
+                trim_low=0.0,
+                trim_high=10.0,
+                options={"matrix_preset_ids": ["shorts", "tiktok"]},
+                entries=[
+                    ManifestEntry(
+                        source_path=Path(tmp) / "clip.mp4",
+                        children={
+                            "shorts": {"status": "done", "output_path": "shorts.mp4"},
+                            "tiktok": {"status": "pending"},
+                        },
+                    )
+                ],
+            )
+
+            save(original, manifest_path)
+            loaded = load(manifest_path)
+
+            assert loaded is not None
+            self.assertEqual(loaded.entries[0].children["shorts"]["status"], "done")
+            self.assertEqual(loaded.options["matrix_preset_ids"], ["shorts", "tiktok"])
+
     def test_cleanup_removes_only_hidden_parts_inside_output_dir(self) -> None:
         from core.job_manifest import BatchManifest, ManifestEntry, cleanup_partial_outputs
 
@@ -140,6 +170,46 @@ class JobManifestTests(unittest.TestCase):
                         manifest.entries[0].temp_output_path.name.startswith(".vertigo-")
                     )
                 finally:
+                    win._ctl.batch_manifest = None
+                    win.close()
+                    win.deleteLater()
+                    discard(manifest_file)
+
+    def test_starting_matrix_publishes_one_child_per_platform(self) -> None:
+        from core.job_manifest import discard, load
+        from ui.main_window import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "exports"
+            manifest_file = Path(tmp) / "matrix-batch.json"
+            source = Path(tmp) / "clip.mp4"
+            source.write_bytes(b"not a real clip")
+            with patch.dict(os.environ, {"VERTIGO_BATCH_MANIFEST": str(manifest_file)}):
+                win = MainWindow()
+                try:
+                    win._queue.add(source)
+                    win._matrix_toggle.setChecked(True)
+                    win.set_matrix_preset_ids(["shorts", "tiktok"])
+                    with patch(
+                        "ui.file_dialogs.get_existing_directory",
+                        return_value=root,
+                    ), patch.object(
+                        win._ctl,
+                        "_confirm_batch_platform_durations",
+                        return_value=True,
+                    ), patch.object(win._ctl, "_advance_batch"):
+                        win._ctl.start_batch_export()
+
+                    manifest = load(manifest_file)
+                    self.assertIsNotNone(manifest)
+                    assert manifest is not None
+                    children = manifest.entries[0].children
+                    self.assertEqual(set(children), {"shorts", "tiktok"})
+                    self.assertTrue(children["shorts"]["output_path"].endswith("clip_shorts.mp4"))
+                    self.assertTrue(children["tiktok"]["output_path"].endswith("clip_tiktok.mp4"))
+                    self.assertEqual(manifest.options["matrix_preset_ids"], ["shorts", "tiktok"])
+                finally:
+                    win._ctl.batch_manifest = None
                     win.close()
                     win.deleteLater()
                     discard(manifest_file)

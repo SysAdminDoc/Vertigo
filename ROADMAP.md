@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P2 - Add local multi-preset export matrix
-  Why: Premiere Auto Reframe duplicates sequences for target ratios and commercial clippers produce variants per platform; Vertigo has presets but exports one active geometry at a time.
-  Evidence: Adobe Auto Reframe docs; OpusClip API; Klap AI Reframe 2; `core/presets.py`; `ui/main_controller.py`.
-  Touches: `core/presets.py`, `core/encode.py`, `ui/output_panel.py`, `ui/main_controller.py`, `ui/batch_queue.py`, `tests/`.
-  Acceptance: Users can select multiple local presets for a clip or queue, Vertigo writes clear per-platform filenames, progress groups child exports under the source entry, and failures isolate to that preset.
-  Complexity: L
-
 - [ ] P2 - Refresh local packaging and release sanity checks
   Why: `.github/` workflows were removed but README still describes CI release uploads, and PyInstaller/PyQt/OpenCV/MediaPipe releases have moved since the current docs and dependency floors.
   Evidence: `git log -10`; `README.md`; `vertigo.spec`; PyInstaller changelog; PyQt6/PyQt6-Qt6 PyPI; opencv-python PyPI; mediapipe PyPI.

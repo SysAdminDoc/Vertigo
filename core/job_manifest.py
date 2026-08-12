@@ -42,6 +42,10 @@ class ManifestEntry:
     temp_output_path: Path | None = None
     status: str = "pending"
     message: str = ""
+    # Matrix exports keep one visible queue entry per source while recording
+    # each platform child independently.  The field is optional so manifests
+    # written before the matrix feature remain readable.
+    children: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +54,7 @@ class ManifestEntry:
             "temp_output_path": str(self.temp_output_path) if self.temp_output_path else None,
             "status": self.status,
             "message": self.message,
+            "children": self.children,
         }
 
     @classmethod
@@ -65,6 +70,7 @@ class ManifestEntry:
             temp_output_path=_path_or_none(raw.get("temp_output_path")),
             status=str(raw.get("status") or "pending"),
             message=str(raw.get("message") or ""),
+            children=dict(raw.get("children") or {}),
         )
 
 

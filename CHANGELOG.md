@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Local multi-preset export matrix.** The Platform Preset panel can now
+  select multiple delivery targets for a clip or queue. Each source remains a
+  single queue item while child exports write deterministic
+  `{clip}_{platform}.mp4` files, persist hidden partials, and report a failed
+  platform without hiding successful siblings.
 - **Caption timing review.** The subtitles panel now follows the player
   playhead, exposes a chunk list, supports small selected/all nudges, simple
   split/merge edits, and atomically saves corrected SRT or ASS timing back to

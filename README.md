@@ -27,6 +27,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
   - **Manual** — drag the viewport on the live preview to lock any column.
 - **Platform presets** — YouTube Shorts, TikTok, Instagram Reels, Square (1:1). One click switches output geometry and encoder target bitrate.
 - **Batch queue** — drop many clips at once, preview any one, then **Export All** to a folder. Per-item status indicator.
+- **Local export matrix** — check multiple platform presets to write clear `{clip}_{platform}.mp4` variants for one clip or the whole queue; each source stays grouped while child progress and failures remain isolated.
 - **Trim timeline** — dual-thumb in/out range slider directly on the preview. Exports respect the trim window via FFmpeg `-ss` / `-t`.
 - **Four one-click trim helpers** — *Suggest segments* (TextTiling-ranked candidates on clips > 10 min, now with min / target / max length sliders; **requires AI captions to be generated first** so the segmenter has a transcript to work with), *Find highlights* (energy-ranked moments, Lighthouse + fallback), *Trim silences* (longest speech-contiguous sections via auto-editor), *Tighten to speech* (outer speech edges via Silero VAD). Each pops a menu of candidates; picking one drops the trim handles in place.
 - **Export thumbnails** — one-click save of six representative PNG cover frames (Katna-ranked when installed, evenly-spaced cv2 frames otherwise).
@@ -126,7 +127,7 @@ core/
   encode.py               FFmpeg subprocess + progress parsing + trim + burn-in
   preflight.py            VFR corrections + FFmpeg/Pillow security preflight
   safe_zones.py           Platform guide geometry + caption/overlay validation
-  job_manifest.py         Atomic local batch recipe/progress persistence
+  job_manifest.py         Atomic local batch recipe/progress persistence + matrix child state
   integrations.py         Optional package readiness + redacted credential probes
   dryrun.py               plan-only report (TRACK / LETTERBOX / CENTER strategy)
   hook_score.py           0-100 first-3-second engagement score (no torch)

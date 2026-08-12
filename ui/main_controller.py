@@ -143,6 +143,9 @@ class MainController(QObject):
         self._batch_manifest_entries: dict[int, ManifestEntry] = {}
         self._batch_final_outputs: dict[int, Path] = {}
         self._active_batch_entry_id: int | None = None
+        self._batch_scope_ids: set[int] = set()
+        self._batch_matrix_preset_ids: list[str] = []
+        self._matrix_origin_preset_id: str | None = None
         self.suppress_auto_detect: bool = False
 
         # export output tracking
@@ -910,6 +913,17 @@ class MainController(QObject):
         w = self.win
         if not w._info or not w._current_entry:
             return
+        matrix_ids = w.matrix_preset_ids()
+        if w.matrix_enabled() and len(matrix_ids) > 1:
+            if not self._confirm_matrix_platform_durations([w._current_entry], matrix_ids):
+                return
+            from .file_dialogs import get_existing_directory
+
+            out_dir = get_existing_directory(w, "Output folder for preset matrix")
+            if not out_dir:
+                return
+            self._start_matrix_export(w._current_entry, Path(out_dir), matrix_ids)
+            return
         if not self._confirm_platform_duration():
             return
         from .file_dialogs import get_save_video_path
@@ -918,6 +932,29 @@ class MainController(QObject):
         if not path:
             return
         self._run_encode_job(w._info, Path(path), w._current_entry)
+
+    def _start_matrix_export(
+        self,
+        entry: QueueEntry,
+        out_dir: Path,
+        preset_ids: list[str],
+    ) -> None:
+        """Run a matrix for one already-selected queue entry."""
+
+        w = self.win
+        self.batch_out_dir = Path(out_dir)
+        self._batch_scope_ids = {entry.id}
+        self._matrix_origin_preset_id = w._preset.id
+        self._batch_matrix_preset_ids = list(preset_ids)
+        self._new_batch_manifest([entry], matrix_preset_ids=preset_ids)
+        self.batch_running = True
+        w._toast.show_toast(
+            f"Preset matrix started: {len(preset_ids)} platform exports",
+            kind="info",
+        )
+        w._refresh_progress_hint()
+        w._refresh_overview()
+        self._advance_batch()
 
     def _confirm_platform_duration(self) -> bool:
         w = self.win
@@ -966,6 +1003,46 @@ class MainController(QObject):
                 f"the {w._preset.label} limit of {_fmt_duration(w._preset.max_duration)}:\n\n"
                 f"{preview}{extra}\n\nExport the batch anyway?"
             ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_matrix_platform_durations(
+        self,
+        entries: list[QueueEntry],
+        preset_ids: list[str],
+    ) -> bool:
+        """Ask once when a matrix includes clips above any platform limit."""
+
+        from core.presets import PRESETS
+
+        limits = {
+            pid: PRESETS[pid].max_duration
+            for pid in preset_ids
+            if pid in PRESETS and PRESETS[pid].max_duration
+        }
+        if not limits:
+            return True
+        over_limit: list[str] = []
+        for entry in entries:
+            try:
+                info = probe(entry.path)
+            except Exception:
+                continue
+            for pid, limit in limits.items():
+                if info.duration > limit:
+                    over_limit.append(
+                        f"{entry.path.name} → {PRESETS[pid].label} ({_fmt_duration(info.duration)} > {_fmt_duration(limit)})"
+                    )
+        if not over_limit:
+            return True
+        preview = "\n".join(f"- {item}" for item in over_limit[:6])
+        extra = "" if len(over_limit) <= 6 else f"\n...and {len(over_limit) - 6} more."
+        answer = QMessageBox.warning(
+            self.win,
+            "Matrix includes long clips",
+            f"Some platform variants exceed their duration limit:\n\n{preview}{extra}\n\nExport the matrix anyway?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1446,9 +1523,34 @@ class MainController(QObject):
         self._show_output_destination(out_path)
         w._toast.show_toast(f"Exported {out_path.name}", kind="success")
         if entry_id is not None:
-            w._queue.update_status(entry_id, QueueStatus.DONE, "exported")
-            self._set_manifest_entry(entry_id, status="done", message="exported")
-            self._active_batch_entry_id = None
+            if self._is_matrix_batch():
+                preset_id = w._preset.id
+                self._set_matrix_child(
+                    entry_id,
+                    preset_id,
+                    status="done",
+                    message=f"exported {w._preset.label}",
+                )
+                done, failed, total = self._matrix_counts(entry_id)
+                if done + failed >= total:
+                    status = QueueStatus.FAILED if failed else QueueStatus.DONE
+                    w._queue.update_status(
+                        entry_id,
+                        status,
+                        f"{done}/{total} platform exports"
+                        + (f" · {failed} failed" if failed else ""),
+                    )
+                    self._active_batch_entry_id = None
+                else:
+                    w._queue.update_status(
+                        entry_id,
+                        QueueStatus.ACTIVE,
+                        f"{done}/{total} platform exports complete",
+                    )
+            else:
+                w._queue.update_status(entry_id, QueueStatus.DONE, "exported")
+                self._set_manifest_entry(entry_id, status="done", message="exported")
+                self._active_batch_entry_id = None
         w._refresh_queue_count()
         w._refresh_overview()
         if self.batch_running:
@@ -1463,6 +1565,37 @@ class MainController(QObject):
         self.win._set_export_status("Cancelled" if cancelled else "Export failed", tone="warning")
         w._toast.show_toast(msg, kind="warning" if cancelled else "error")
         if entry_id is not None:
+            if self._is_matrix_batch():
+                preset_id = w._preset.id
+                self._set_matrix_child(
+                    entry_id,
+                    preset_id,
+                    status="pending" if cancelled else "failed",
+                    message=msg,
+                )
+                done, failed, total = self._matrix_counts(entry_id)
+                if done + failed >= total and not cancelled:
+                    w._queue.update_status(
+                        entry_id,
+                        QueueStatus.FAILED,
+                        f"{done}/{total} platform exports · {failed} failed",
+                    )
+                    self._active_batch_entry_id = None
+                else:
+                    w._queue.update_status(
+                        entry_id,
+                        QueueStatus.ACTIVE,
+                        f"{done}/{total} platform exports"
+                        + (f" · {failed} failed" if failed else ""),
+                    )
+                self._batch_final_outputs.pop(entry_id, None)
+                w._refresh_queue_count()
+                w._refresh_overview()
+                if self.batch_running:
+                    self._advance_batch()
+                else:
+                    self._reset_export_ui()
+                return
             w._queue.update_status(
                 entry_id,
                 QueueStatus.PENDING if cancelled else QueueStatus.FAILED,
@@ -1533,6 +1666,10 @@ class MainController(QObject):
         w = self.win
         for btn in w._preset_buttons.values():
             btn.setEnabled(not busy)
+        if hasattr(w, "_matrix_toggle"):
+            w._matrix_toggle.setEnabled(not busy)
+            for check in w._matrix_checks.values():
+                check.setEnabled(not busy)
         for card in w._mode_cards.values():
             card.setEnabled(not busy)
         w._drop.setEnabled(not busy)
@@ -1563,6 +1700,7 @@ class MainController(QObject):
                 "preset_id": subtitles.preset_id if subtitles else "pop",
                 "face_aware": bool(subtitles and subtitles.face_aware),
             },
+            "matrix_preset_ids": list(self._batch_matrix_preset_ids),
             "overlays": [
                 {
                     "text": overlay.text,
@@ -1617,9 +1755,53 @@ class MainController(QObject):
             manifest_entry.temp_output_path = None
         self._save_batch_manifest()
 
-    def _batch_output_paths(self, entry: QueueEntry) -> tuple[Path, Path]:
+    def _set_matrix_child(
+        self,
+        entry_id: int | None,
+        preset_id: str,
+        *,
+        status: str,
+        message: str = "",
+        output_path: Path | None = None,
+        temp_output_path: Path | None = None,
+    ) -> None:
+        manifest_entry = self._manifest_entry(entry_id)
+        if manifest_entry is None:
+            return
+        child = manifest_entry.children.setdefault(preset_id, {})
+        child["status"] = status
+        child["message"] = message
+        if output_path is not None:
+            child["output_path"] = str(output_path)
+        if temp_output_path is not None:
+            child["temp_output_path"] = str(temp_output_path)
+        elif status == "done":
+            child["temp_output_path"] = None
+
+        statuses = [str(raw.get("status") or "pending") for raw in manifest_entry.children.values()]
+        if statuses and all(value in {"done", "failed"} for value in statuses):
+            manifest_entry.status = "done"
+            done = sum(value == "done" for value in statuses)
+            failed = sum(value == "failed" for value in statuses)
+            manifest_entry.message = f"{done} platform export(s) complete"
+            if failed:
+                manifest_entry.message += f"; {failed} failed"
+        elif any(value == "active" for value in statuses):
+            manifest_entry.status = "active"
+            manifest_entry.message = message
+        else:
+            manifest_entry.status = "pending"
+            manifest_entry.message = message
+        self._save_batch_manifest()
+
+    def _batch_output_paths(
+        self,
+        entry: QueueEntry,
+        preset_id: str | None = None,
+    ) -> tuple[Path, Path]:
         assert self.batch_out_dir is not None
-        final = self.batch_out_dir / f"{entry.path.stem}_{self.win._preset.id}.mp4"
+        output_preset_id = preset_id or self.win._preset.id
+        final = self.batch_out_dir / f"{entry.path.stem}_{output_preset_id}.mp4"
         if self.batch_manifest is None:
             return final, final
         temp = final.with_name(
@@ -1627,9 +1809,64 @@ class MainController(QObject):
         )
         return final, temp
 
-    def _new_batch_manifest(self, pending: list[QueueEntry]) -> BatchManifest:
+    def _is_matrix_batch(self) -> bool:
+        return bool(self.batch_running and len(self._batch_matrix_preset_ids) > 1)
+
+    def _next_matrix_preset(self, entry_id: int | None) -> str | None:
+        manifest_entry = self._manifest_entry(entry_id)
+        if manifest_entry is None:
+            return None
+        for preset_id in self._batch_matrix_preset_ids:
+            raw = manifest_entry.children.get(preset_id) or {}
+            if str(raw.get("status") or "pending") not in {"done", "failed"}:
+                return preset_id
+        return None
+
+    def _matrix_counts(self, entry_id: int | None) -> tuple[int, int, int]:
+        manifest_entry = self._manifest_entry(entry_id)
+        if manifest_entry is None:
+            return (0, 0, 0)
+        statuses = [
+            str((manifest_entry.children.get(pid) or {}).get("status") or "pending")
+            for pid in self._batch_matrix_preset_ids
+        ]
+        return (
+            sum(status == "done" for status in statuses),
+            sum(status == "failed" for status in statuses),
+            len(statuses),
+        )
+
+    def _matrix_queue_message(self, entry_id: int | None) -> str:
+        done, failed, total = self._matrix_counts(entry_id)
+        message = f"{done}/{total} platform exports"
+        if failed:
+            message += f" · {failed} failed"
+        return message
+
+    def _matrix_entry_terminal(self, entry_id: int | None) -> bool:
+        done, failed, total = self._matrix_counts(entry_id)
+        return total > 0 and done + failed == total
+
+    @staticmethod
+    def _matrix_message_from_statuses(statuses: list[str]) -> str:
+        done = sum(status == "done" for status in statuses)
+        failed = sum(status == "failed" for status in statuses)
+        message = f"{done}/{len(statuses)} platform exports complete"
+        if failed:
+            message += f"; {failed} failed"
+        return message
+
+    def _new_batch_manifest(
+        self,
+        pending: list[QueueEntry],
+        *,
+        matrix_preset_ids: list[str] | None = None,
+    ) -> BatchManifest:
         w = self.win
         assert self.batch_out_dir is not None
+        matrix_ids = list(matrix_preset_ids or [])
+        self._batch_matrix_preset_ids = matrix_ids
+        self._batch_scope_ids = {entry.id for entry in pending}
         manifest = BatchManifest.new(
             output_dir=self.batch_out_dir,
             preset_id=w._preset.id,
@@ -1637,7 +1874,16 @@ class MainController(QObject):
             trim_low=w._trim_low,
             trim_high=w._trim_high,
             options=self._batch_options(),
-            entries=[ManifestEntry(source_path=entry.path) for entry in pending],
+            entries=[
+                ManifestEntry(
+                    source_path=entry.path,
+                    children={
+                        pid: {"status": "pending"}
+                        for pid in matrix_ids
+                    },
+                )
+                for entry in pending
+            ],
         )
         self.batch_manifest = manifest
         self._batch_manifest_entries = {
@@ -1645,16 +1891,31 @@ class MainController(QObject):
             for entry, manifest_entry in zip(pending, manifest.entries)
         }
         for entry in pending:
-            final, temp = self._batch_output_paths(entry)
             manifest_entry = self._batch_manifest_entries[entry.id]
-            manifest_entry.output_path = final
-            manifest_entry.temp_output_path = temp
+            if matrix_ids:
+                for pid in matrix_ids:
+                    final, temp = self._batch_output_paths(entry, pid)
+                    manifest_entry.children[pid] = {
+                        "status": "pending",
+                        "output_path": str(final),
+                        "temp_output_path": str(temp),
+                    }
+            else:
+                final, temp = self._batch_output_paths(entry)
+                manifest_entry.output_path = final
+                manifest_entry.temp_output_path = temp
         self._save_batch_manifest()
         return manifest
 
     def offer_incomplete_manifest(self) -> None:
         """Offer recovery for a batch left running by a prior app session."""
         if self.batch_running or self.batch_manifest is not None:
+            return
+        # The timer is scheduled during construction, before the application
+        # calls ``show()``.  In offscreen tests and during a close race there
+        # is no user-facing window that can own a modal dialog; skip the offer
+        # and let the next visible launch handle it safely.
+        if not self.win.isVisible():
             return
         manifest = load_manifest()
         if manifest is None or not manifest.incomplete:
@@ -1681,34 +1942,83 @@ class MainController(QObject):
         w = self.win
         self.batch_manifest = manifest
         self.batch_out_dir = manifest.output_dir
+        self._batch_matrix_preset_ids = [
+            str(pid) for pid in manifest.options.get("matrix_preset_ids") or []
+        ]
+        if not self._batch_matrix_preset_ids:
+            self._batch_matrix_preset_ids = list(
+                manifest.entries[0].children
+                if manifest.entries and manifest.entries[0].children
+                else []
+            )
         self._batch_manifest_entries = {}
+        self._batch_scope_ids = set()
         restored_specs: list[tuple[Path, QueueStatus, str]] = []
         for manifest_entry in manifest.entries:
-            output_exists = bool(
-                manifest_entry.status == "done"
-                and manifest_entry.output_path
-                and manifest_entry.output_path.exists()
-            )
-            if output_exists:
-                manifest_entry.status = "done"
-                manifest_entry.message = "exported before restart"
-                queue_status = QueueStatus.DONE
-                message = "exported before restart"
-            elif not manifest_entry.source_path.exists():
-                manifest_entry.status = "failed"
-                manifest_entry.message = "source file is missing"
-                queue_status = QueueStatus.FAILED
-                message = "source file is missing"
+            if manifest_entry.children:
+                if not manifest_entry.source_path.exists():
+                    manifest_entry.status = "failed"
+                    manifest_entry.message = "source file is missing"
+                    queue_status = QueueStatus.FAILED
+                    message = "source file is missing"
+                else:
+                    for raw in manifest_entry.children.values():
+                        if str(raw.get("status") or "pending") == "active":
+                            raw["status"] = "pending"
+                            raw["message"] = "ready to resume"
+                        if str(raw.get("status") or "pending") == "done":
+                            output = raw.get("output_path")
+                            if not output or not Path(str(output)).exists():
+                                raw["status"] = "pending"
+                                raw["message"] = "final output is missing"
+                    statuses = [
+                        str(raw.get("status") or "pending")
+                        for raw in manifest_entry.children.values()
+                    ]
+                    terminal = statuses and all(
+                        value in {"done", "failed"} for value in statuses
+                    )
+                    if terminal:
+                        manifest_entry.status = "done"
+                        manifest_entry.message = self._matrix_message_from_statuses(statuses)
+                        queue_status = (
+                            QueueStatus.FAILED
+                            if any(value == "failed" for value in statuses)
+                            else QueueStatus.DONE
+                        )
+                        message = manifest_entry.message
+                    else:
+                        manifest_entry.status = "pending"
+                        manifest_entry.message = "ready to resume"
+                        queue_status = QueueStatus.PENDING
+                        message = "ready to resume"
             else:
-                manifest_entry.status = "pending"
-                manifest_entry.message = "ready to resume"
-                queue_status = QueueStatus.PENDING
-                message = "ready to resume"
+                output_exists = bool(
+                    manifest_entry.status == "done"
+                    and manifest_entry.output_path
+                    and manifest_entry.output_path.exists()
+                )
+                if output_exists:
+                    manifest_entry.status = "done"
+                    manifest_entry.message = "exported before restart"
+                    queue_status = QueueStatus.DONE
+                    message = "exported before restart"
+                elif not manifest_entry.source_path.exists():
+                    manifest_entry.status = "failed"
+                    manifest_entry.message = "source file is missing"
+                    queue_status = QueueStatus.FAILED
+                    message = "source file is missing"
+                else:
+                    manifest_entry.status = "pending"
+                    manifest_entry.message = "ready to resume"
+                    queue_status = QueueStatus.PENDING
+                    message = "ready to resume"
             restored_specs.append((manifest_entry.source_path, queue_status, message))
 
         restored = w._queue.restore(restored_specs, select_first=False)
         for entry, manifest_entry in zip(restored, manifest.entries):
             self._batch_manifest_entries[entry.id] = manifest_entry
+            self._batch_scope_ids.add(entry.id)
         self._restore_batch_options(manifest.options)
         manifest.state = "running"
         manifest.touch()
@@ -1770,6 +2080,15 @@ class MainController(QObject):
             if hasattr(w, "_output_panel"):
                 w._output_panel.set_selection(w._output_choice)
 
+            matrix_ids = [
+                str(pid) for pid in options.get("matrix_preset_ids") or []
+                if str(pid) in getattr(w, "_matrix_checks", {})
+            ]
+            if matrix_ids:
+                self._batch_matrix_preset_ids = matrix_ids
+                w._matrix_toggle.setChecked(True)
+                w.set_matrix_preset_ids(matrix_ids)
+
             restored_overlays = []
             for raw in options.get("overlays") or []:
                 restored_overlays.append(
@@ -1801,6 +2120,9 @@ class MainController(QObject):
         discard_manifest()
         self.batch_manifest = None
         self._batch_manifest_entries.clear()
+        self._batch_scope_ids.clear()
+        self._batch_matrix_preset_ids.clear()
+        self._matrix_origin_preset_id = None
         self.win._toast.show_toast(
             f"Discarded unfinished batch state ({len(removed)} partial file(s) removed).",
             kind="info",
@@ -1813,6 +2135,10 @@ class MainController(QObject):
         if active is not None and active.status == "active":
             active.status = "pending"
             active.message = reason
+            for raw in active.children.values():
+                if str(raw.get("status") or "pending") == "active":
+                    raw["status"] = "pending"
+                    raw["message"] = reason
         self.batch_manifest.state = "interrupted"
         self.batch_manifest.touch()
         self._save_batch_manifest()
@@ -1824,15 +2150,29 @@ class MainController(QObject):
         pending = w._queue.pending_entries()
         if not pending:
             return
-        if not self._confirm_batch_platform_durations(pending):
+        matrix_ids = w.matrix_preset_ids() if w.matrix_enabled() else []
+        if len(matrix_ids) > 1:
+            duration_ok = self._confirm_matrix_platform_durations(pending, matrix_ids)
+        else:
+            duration_ok = self._confirm_batch_platform_durations(pending)
+        if not duration_ok:
             return
         out_dir = get_existing_directory(w, "Output folder for batch")
         if not out_dir:
             return
         self.batch_out_dir = Path(out_dir)
-        self._new_batch_manifest(pending)
+        self._matrix_origin_preset_id = w._preset.id
+        self._new_batch_manifest(
+            pending,
+            matrix_preset_ids=matrix_ids if len(matrix_ids) > 1 else None,
+        )
         self.batch_running = True
-        w._toast.show_toast(f"Batch export started: {len(pending)} clips", kind="info")
+        label = (
+            f"Batch matrix started: {len(pending)} clips × {len(matrix_ids)} platforms"
+            if len(matrix_ids) > 1
+            else f"Batch export started: {len(pending)} clips"
+        )
+        w._toast.show_toast(label, kind="info")
         w._refresh_progress_hint()
         w._refresh_overview()
         self._advance_batch()
@@ -1842,7 +2182,36 @@ class MainController(QObject):
         if not self.batch_running:
             self._reset_export_ui()
             return
-        pending = w._queue.pending_entries()
+
+        if self._is_matrix_batch() and self._active_batch_entry_id is not None:
+            active_entry = next(
+                (
+                    candidate
+                    for candidate in w._queue.entries()
+                    if candidate.id == self._active_batch_entry_id
+                ),
+                None,
+            )
+            next_preset = self._next_matrix_preset(self._active_batch_entry_id)
+            if active_entry is not None and next_preset is not None:
+                self._start_matrix_child(active_entry, next_preset)
+                return
+            if active_entry is not None and self._matrix_entry_terminal(active_entry.id):
+                done, failed, total = self._matrix_counts(active_entry.id)
+                status = QueueStatus.FAILED if failed else QueueStatus.DONE
+                w._queue.update_status(
+                    active_entry.id,
+                    status,
+                    f"{done}/{total} platform exports"
+                    + (f" · {failed} failed" if failed else ""),
+                )
+            self._active_batch_entry_id = None
+
+        scoped_entries = [
+            entry for entry in w._queue.entries()
+            if not self._batch_scope_ids or entry.id in self._batch_scope_ids
+        ]
+        pending = [entry for entry in scoped_entries if entry.status is QueueStatus.PENDING]
         if not pending:
             self.batch_running = False
             if self.batch_manifest is not None:
@@ -1850,6 +2219,9 @@ class MainController(QObject):
                 self.batch_manifest.touch()
                 self._save_batch_manifest()
             self._active_batch_entry_id = None
+            if self._matrix_origin_preset_id in getattr(w, "_preset_buttons", {}):
+                w._choose_preset(self._matrix_origin_preset_id)
+            self._matrix_origin_preset_id = None
             self.win._set_export_status("Batch complete", tone="success")
             if self.batch_out_dir is not None:
                 self.last_output_path = self.batch_out_dir
@@ -1859,6 +2231,15 @@ class MainController(QObject):
             return
         entry = pending[0]
         self._active_batch_entry_id = entry.id
+        if self._is_matrix_batch():
+            next_preset = self._next_matrix_preset(entry.id)
+            if next_preset is None:
+                self._active_batch_entry_id = None
+                self._advance_batch()
+                return
+            self._start_matrix_child(entry, next_preset)
+            return
+
         final_out, temp_out = self._batch_output_paths(entry)
         self._set_manifest_entry(
             entry.id,
@@ -1902,6 +2283,61 @@ class MainController(QObject):
                 final_output_path=final_out,
             )
 
+    def _start_matrix_child(self, entry: QueueEntry, preset_id: str) -> None:
+        """Prepare one platform child while keeping the source grouped."""
+
+        w = self.win
+        if preset_id not in getattr(w, "_preset_buttons", {}):
+            w._queue.update_status(entry.id, QueueStatus.FAILED, f"unknown preset: {preset_id}")
+            self._set_matrix_child(entry.id, preset_id, status="failed", message="unknown preset")
+            self._active_batch_entry_id = entry.id
+            self._advance_batch()
+            return
+        w._choose_preset(preset_id)
+        final_out, temp_out = self._batch_output_paths(entry, preset_id)
+        w._queue.update_status(
+            entry.id,
+            QueueStatus.ACTIVE,
+            f"{self._matrix_queue_message(entry.id)} · preparing {w._preset.label}",
+        )
+        self._set_matrix_child(
+            entry.id,
+            preset_id,
+            status="active",
+            message=f"preparing {w._preset.label}",
+            output_path=final_out,
+            temp_output_path=temp_out,
+        )
+        self.suppress_auto_detect = True
+        try:
+            w._queue.select(entry.id)
+        finally:
+            self.suppress_auto_detect = False
+        try:
+            info = probe(entry.path)
+        except Exception as exc:
+            message = f"probe: {exc}"
+            self._set_matrix_child(entry.id, preset_id, status="failed", message=message)
+            self._active_batch_entry_id = entry.id
+            self._advance_batch()
+            return
+        w._info = info
+        w._current_entry = entry
+        if self.batch_manifest and self.batch_manifest.trim_high > 0:
+            w._trim_low = min(max(0.0, self.batch_manifest.trim_low), info.duration)
+            w._trim_high = min(max(w._trim_low, self.batch_manifest.trim_high), info.duration)
+        else:
+            w._trim_low = 0.0
+            w._trim_high = info.duration
+        w._refresh_platform_notice()
+        w._refresh_overview()
+        if w._mode is ReframeMode.SMART_TRACK:
+            self.scenes = []
+            self.track_points = []
+            self._run_detect_then_encode(info, entry, final_out, temp_out)
+        else:
+            self._run_encode_job(info, temp_out, entry, final_output_path=final_out)
+
     def _run_detect_then_encode(
         self,
         info: VideoInfo,
@@ -1941,6 +2377,32 @@ class MainController(QObject):
 
         def _fail(msg):
             w._detect_progress.hide()
+            if self._is_matrix_batch():
+                preset_id = w._preset.id
+                self._set_matrix_child(
+                    entry.id,
+                    preset_id,
+                    status="failed",
+                    message=f"detect: {msg}",
+                )
+                done, failed, total = self._matrix_counts(entry.id)
+                if done + failed >= total:
+                    w._queue.update_status(
+                        entry.id,
+                        QueueStatus.FAILED,
+                        f"{done}/{total} platform exports · {failed} failed",
+                    )
+                    self._active_batch_entry_id = None
+                else:
+                    w._queue.update_status(
+                        entry.id,
+                        QueueStatus.ACTIVE,
+                        f"{done}/{total} platform exports · {failed} failed",
+                    )
+                w._refresh_detection_actions()
+                w._refresh_overview()
+                self._advance_batch()
+                return
             w._queue.update_status(entry.id, QueueStatus.FAILED, f"detect: {msg}")
             self._set_manifest_entry(entry.id, status="failed", message=f"detect: {msg}")
             self._active_batch_entry_id = None
