@@ -34,7 +34,7 @@ _REQUIRED = [
     ("PyQt6",        "PyQt6>=6.7.0"),
     ("cv2",          "opencv-python>=4.10.0"),
     ("numpy",        "numpy>=1.26.0"),
-    ("PIL",          "Pillow>=10.3.0"),
+    ("PIL",          "Pillow>=12.2.0"),
     ("mediapipe",    "mediapipe>=0.10.14"),
     ("scenedetect",  "scenedetect>=0.6.5"),
     ("scipy",        "scipy>=1.11.0"),
@@ -197,6 +197,24 @@ def _check_ffmpeg() -> None:
         )
 
 
+def _check_media_security():
+    """Report parser versions and stop startup when safety is unverifiable."""
+    from core.preflight import inspect_media_dependencies
+
+    report = inspect_media_dependencies()
+    _safe_write(sys.stdout, f"[{APP_NAME}] {report.as_text()}\n")
+    for warning in report.warnings:
+        _safe_write(sys.stdout, f"[{APP_NAME}] WARNING: {warning}\n")
+    if report.blockers:
+        _fatal(
+            "Media dependency security check failed",
+            report.as_text()
+            + "\n\nInstall the patched media dependencies and restart Vertigo.",
+            exit_code=5,
+        )
+    return report
+
+
 def _load_saved_theme(QSettings) -> str:
     """Chained fallback: Vertigo → Kiln → ReelForge → 'system'.
 
@@ -215,6 +233,7 @@ def _load_saved_theme(QSettings) -> str:
 def main() -> int:
     _bootstrap()
     _check_ffmpeg()
+    media_report = _check_media_security()
 
     # late imports so bootstrap can install them first
     if not _is_frozen():
@@ -247,6 +266,12 @@ def main() -> int:
     win = MainWindow()
     if not icon.isNull():
         win.setWindowIcon(icon)
+    toast_kind = "warning" if media_report.warnings else "info"
+    win._toast.show_toast(
+        f"Media preflight · {media_report.version_summary}",
+        kind=toast_kind,
+        duration_ms=7000 if media_report.warnings else 3500,
+    )
     win.show()
     return app.exec()
 

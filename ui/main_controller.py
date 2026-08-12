@@ -51,6 +51,7 @@ from PyQt6.QtWidgets import QMenu, QMessageBox
 
 from core import crashlog
 from core.encode import EncodeJob
+from core.preflight import inspect_media_dependencies
 from core.probe import VideoInfo, probe
 from core.reframe import ReframeMode, build_plan
 from core.subtitles import is_installed as subtitles_installed
@@ -913,6 +914,40 @@ class MainController(QObject):
         if self.detect_worker and self.detect_worker.isRunning():
             w._toast.show_toast("Wait for analysis to finish before exporting.", kind="warning")
             return
+        try:
+            media_report = inspect_media_dependencies()
+        except Exception as e:
+            w._set_export_status("Export blocked", tone="warning")
+            w._toast.show_toast(
+                f"Media security preflight failed: {e}",
+                kind="error",
+                duration_ms=8000,
+            )
+            if self.batch_running:
+                if entry:
+                    w._queue.update_status(entry.id, QueueStatus.FAILED, "media security preflight")
+                self.batch_running = False
+                self._reset_export_ui()
+            return
+        if media_report.blockers:
+            w._set_export_status("Export blocked", tone="warning")
+            w._toast.show_toast(
+                f"Export blocked: {media_report.blocker_summary}",
+                kind="error",
+                duration_ms=8000,
+            )
+            if self.batch_running:
+                if entry:
+                    w._queue.update_status(entry.id, QueueStatus.FAILED, "media security preflight")
+                self.batch_running = False
+                self._reset_export_ui()
+            return
+        if media_report.warnings:
+            w._toast.show_toast(
+                f"Media security warning: {media_report.warnings[0]}",
+                kind="warning",
+                duration_ms=8000,
+            )
         try:
             plan = build_plan(
                 info,

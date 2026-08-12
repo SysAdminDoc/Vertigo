@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .caption_styles import CaptionPreset, force_style_string, resolve as resolve_caption_preset
 from .encoders import Encoder, encoder_args, pick_default
-from .preflight import Preflight, plan_preflight
+from .preflight import inspect_media_dependencies, plan_preflight
 from .presets import Preset
 from .probe import VideoInfo
 from .reframe import ReframePlan
@@ -64,7 +64,12 @@ class EncodeJob:
     overlay_video: Path | None = None
 
     def build_command(self) -> list[str]:
-        cmd = [ffmpeg_bin(), "-y", "-hide_banner", "-stats", "-progress", "pipe:2"]
+        ffmpeg = ffmpeg_bin()
+        media_report = inspect_media_dependencies(ffmpeg_path=ffmpeg)
+        if media_report.blockers:
+            raise RuntimeError(media_report.blocker_summary)
+
+        cmd = [ffmpeg, "-y", "-hide_banner", "-stats", "-progress", "pipe:2"]
 
         preflight = plan_preflight(self.info, self.preset.fps)
 

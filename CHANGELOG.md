@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Media dependency security preflight.** Startup and export now report the
+  active FFmpeg/Pillow versions, warn on stale recognized FFmpeg branches, and
+  block exports when either FFmpeg cannot be verified or Pillow is below the
+  patched 12.2.0 floor. The Pillow requirement and bootstrap floor are synced,
+  and version/warning/blocking paths are covered by regression tests.
 - **Worker-output scrub parity.** Subtitle sidecars now write through an
   atomic same-directory swap, skip publication when cancellation lands after
   transcription, and remove newly-created `.srt` / `.ass` files plus `.tmp`

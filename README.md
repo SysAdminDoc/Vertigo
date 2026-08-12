@@ -33,6 +33,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Adjustments panel** — live brightness / contrast / saturation sliders; applied via FFmpeg `eq=` filter appended to the reframe chain.
 - **Scene detection** — PySceneDetect (with a histogram-delta fallback) segments the timeline to stabilize Smart Track.
 - **Hardware encoding** — auto-detects NVIDIA NVENC, Intel QuickSync, AMD AMF, Apple VideoToolbox, and the libx264/libx265 CPU encoders. Pick one in the Output tab, drive a single quality slider, tune the speed preset.
+- **Media security preflight** — reports the active FFmpeg and Pillow versions at startup, warns on stale FFmpeg release branches, and blocks exports when Pillow is below the patched 12.2.0 floor or either version cannot be verified.
 - **AI captions** — optional faster-whisper transcription (opt-in lazy install) with SRT burn-in. Word-wrapped, mobile-safe styling baked directly into the exported pixels.
 - **Text overlays** — title cards, top straps, lower-thirds, and bottom captions. Per-overlay time range, color, and font size. Preset library for common Shorts/Reels motifs. All burned into the output via `drawtext=` filter chain.
 - **Live crop viewport** overlaid on the preview player so you see the target frame before rendering.
@@ -74,7 +75,7 @@ cd Vertigo
 python vertigo.py
 ```
 
-First run bootstraps PyQt6, OpenCV, NumPy, Pillow, MediaPipe, and PySceneDetect. You must also have **FFmpeg** on `PATH`:
+First run bootstraps PyQt6, OpenCV, NumPy, Pillow 12.2.0+, MediaPipe, and PySceneDetect. You must also have **FFmpeg** on `PATH`; Vertigo reports its version during startup and before export:
 
 ```bash
 # Windows
@@ -118,7 +119,7 @@ core/
   overlays.py             TextOverlay dataclass + drawtext filter chain
   reframe.py              FFmpeg filter graph per mode + Adjustments dataclass
   encode.py               FFmpeg subprocess + progress parsing + trim + burn-in
-  preflight.py            pre-export sanity checks (codec, duration, free disk)
+  preflight.py            VFR corrections + FFmpeg/Pillow security preflight
   dryrun.py               plan-only report (TRACK / LETTERBOX / CENTER strategy)
   hook_score.py           0-100 first-3-second engagement score (no torch)
   segment_proposals.py    T3b — local TextTiling segmenter + silence-gap + length-fit ranker
@@ -200,7 +201,7 @@ Or push a tag and let CI build all three — see `.github/workflows/build.yml`. 
 
 - Python 3.10+
 - FFmpeg / ffprobe on PATH
-- PyQt6, OpenCV, MediaPipe, NumPy, Pillow, PySceneDetect (auto-installed)
+- PyQt6, OpenCV, MediaPipe, NumPy, Pillow>=12.2.0, PySceneDetect (auto-installed)
 
 ## License
 

@@ -18,13 +18,17 @@ without noticing:
        fractions of a second off. Corrected with `-itsoffset` on
        the audio input so A/V realigns at t=0.
 
-This module exposes tiny, pure helpers the encoder imports — no
-subprocessing is done here, only recipe-generation, so the encoder
-stays the single orchestrator of FFmpeg calls.
+This module exposes tiny recipe helpers plus a media-dependency security
+probe. The correction planner stays pure; the security probe runs only the
+short ``ffmpeg -version`` check needed before startup/export.
 """
 
 from __future__ import annotations
 
+import importlib.metadata
+import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 
 from .probe import VideoInfo
@@ -34,6 +38,192 @@ from .probe import VideoInfo
 # videos that idle at ~25 fps but burst to 60 fps during motion. Nudging
 # to the next "normal" rate keeps Shorts-targeted output smooth.
 _SAFE_FPS_LADDER = (24.0, 25.0, 30.0, 50.0, 60.0)
+
+# Security floors verified against the FFmpeg security/release pages on
+# 2026-08-12.  Distro packages may backport the same fixes without matching
+# the upstream number, so stale upstream branches warn rather than hard-stop.
+_FFMPEG_SECURITY_FLOORS: dict[tuple[int, int], tuple[int, int, int]] = {
+    (8, 1): (8, 1, 2),
+    (8, 0): (8, 0, 3),
+    (7, 1): (7, 1, 5),
+    (7, 0): (7, 0, 3),
+    (6, 1): (6, 1, 6),
+    (5, 1): (5, 1, 10),
+    (4, 4): (4, 4, 8),
+}
+PILLOW_SECURITY_FLOOR = (12, 2, 0)
+_VERSION_RE = re.compile(r"(?<![\d.])v?(\d+)\.(\d+)(?:\.(\d+))?(?!\d)")
+
+
+@dataclass(frozen=True)
+class MediaSecurityReport:
+    """Version and security status for the two media parsers we invoke.
+
+    ``warnings`` are actionable but may be safe on a distro-maintained
+    backport. ``blockers`` mean Vertigo cannot establish a safe parser
+    version and must refuse an export that would process untrusted media.
+    """
+
+    ffmpeg_version: tuple[int, int, int] | None
+    pillow_version: tuple[int, int, int] | None
+    ffmpeg_version_text: str | None
+    warnings: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+    @property
+    def can_export(self) -> bool:
+        return not self.blockers
+
+    @property
+    def version_summary(self) -> str:
+        ffmpeg = format_version(self.ffmpeg_version) if self.ffmpeg_version else "unknown"
+        pillow = format_version(self.pillow_version) if self.pillow_version else "unknown"
+        return f"FFmpeg {ffmpeg} · Pillow {pillow}"
+
+    @property
+    def blocker_summary(self) -> str:
+        return " ".join(self.blockers) or "none"
+
+    def as_text(self) -> str:
+        lines = [f"Media dependency preflight: {self.version_summary}"]
+        if self.warnings:
+            lines.append("Warnings:")
+            lines.extend(f"  - {message}" for message in self.warnings)
+        if self.blockers:
+            lines.append("Blockers:")
+            lines.extend(f"  - {message}" for message in self.blockers)
+        return "\n".join(lines)
+
+
+def format_version(version: tuple[int, int, int] | None) -> str:
+    """Render a normalized three-part version for diagnostics."""
+    if version is None:
+        return "unknown"
+    return ".".join(str(part) for part in version)
+
+
+def parse_version(raw: str | None) -> tuple[int, int, int] | None:
+    """Extract a release version from tool/package output."""
+    if not raw:
+        return None
+    match = _VERSION_RE.search(str(raw))
+    if not match:
+        return None
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3) or 0),
+    )
+
+
+def inspect_media_dependencies(
+    *,
+    ffmpeg_path: str | None = None,
+    ffmpeg_output: str | None = None,
+    pillow_version: str | None = None,
+) -> MediaSecurityReport:
+    """Inspect FFmpeg and Pillow before startup or export.
+
+    ``ffmpeg_output`` and ``pillow_version`` are injectable so the security
+    policy can be regression-tested without replacing a user's binaries.
+    """
+    ffmpeg_error: str | None = None
+    if ffmpeg_output is None:
+        ffmpeg_path = ffmpeg_path or shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            ffmpeg_error = "ffmpeg was not found on PATH"
+            raw_ffmpeg = ""
+        else:
+            try:
+                result = subprocess.run(
+                    [ffmpeg_path, "-version"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=5,
+                    creationflags=_no_window_flags(),
+                )
+                raw_ffmpeg = "\n".join(
+                    part for part in (result.stdout, result.stderr) if part
+                )
+                if result.returncode != 0 and not raw_ffmpeg.strip():
+                    ffmpeg_error = f"ffmpeg -version exited {result.returncode}"
+            except (OSError, subprocess.SubprocessError) as exc:
+                raw_ffmpeg = ""
+                ffmpeg_error = f"could not run ffmpeg -version: {exc}"
+    else:
+        raw_ffmpeg = ffmpeg_output
+
+    ffmpeg_version = parse_version(raw_ffmpeg)
+    pillow_raw = pillow_version if pillow_version is not None else _installed_pillow_version()
+    parsed_pillow = parse_version(pillow_raw)
+
+    warnings: list[str] = []
+    blockers: list[str] = []
+
+    if ffmpeg_error:
+        blockers.append(f"FFmpeg security check failed: {ffmpeg_error}.")
+    elif ffmpeg_version is None:
+        blockers.append(
+            "FFmpeg security check could not parse a release version; "
+            "update FFmpeg or make a standard release binary available."
+        )
+    else:
+        floor = _FFMPEG_SECURITY_FLOORS.get(ffmpeg_version[:2])
+        if floor and ffmpeg_version < floor:
+            warnings.append(
+                f"FFmpeg {format_version(ffmpeg_version)} is below the "
+                f"security floor {format_version(floor)} for its release "
+                "branch; update before processing untrusted media or verify "
+                "your distributor's backports."
+            )
+        elif floor is None and ffmpeg_version[0] <= 8:
+            warnings.append(
+                f"FFmpeg {format_version(ffmpeg_version)} is on a release "
+                "branch outside Vertigo's current security-floor table; "
+                "prefer a current maintained FFmpeg branch."
+            )
+
+    if parsed_pillow is None:
+        blockers.append(
+            "Pillow security check could not determine the installed version; "
+            "install Pillow>=12.2.0 before exporting."
+        )
+    elif parsed_pillow < PILLOW_SECURITY_FLOOR:
+        blockers.append(
+            f"Pillow {format_version(parsed_pillow)} is below the security "
+            f"floor {format_version(PILLOW_SECURITY_FLOOR)} (CVE-2026-42310); "
+            "upgrade Pillow before exporting."
+        )
+
+    return MediaSecurityReport(
+        ffmpeg_version=ffmpeg_version,
+        pillow_version=parsed_pillow,
+        ffmpeg_version_text=(raw_ffmpeg.splitlines()[0].strip() if raw_ffmpeg else None),
+        warnings=tuple(warnings),
+        blockers=tuple(blockers),
+    )
+
+
+def _installed_pillow_version() -> str | None:
+    try:
+        return importlib.metadata.version("Pillow")
+    except importlib.metadata.PackageNotFoundError:
+        try:
+            from PIL import __version__
+        except ImportError:
+            return None
+        return str(__version__)
+
+
+def _no_window_flags() -> int:
+    import sys
+
+    if sys.platform == "win32":
+        return subprocess.CREATE_NO_WINDOW
+    return 0
 
 
 @dataclass(frozen=True)

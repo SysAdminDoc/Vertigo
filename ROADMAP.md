@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P0 - Add media dependency security preflight
-  Why: Vertigo processes untrusted local media through FFmpeg and Pillow, and 2026 advisories affect stale FFmpeg plus the current Pillow floor.
-  Evidence: FFmpeg security page; GHSA-qff7-4q6c-m8h6; Pillow GHSA-cfh3-3jmp-rvhc; NVD CVE-2026-42310; `requirements.txt`; `core/probe.py`; `core/encode.py`.
-  Touches: `requirements.txt`, `vertigo.py`, `core/probe.py`, `core/preflight.py`, `core/crashlog.py`, `tests/`.
-  Acceptance: Startup/preflight reports FFmpeg version, warns or blocks known-vulnerable versions before export, Pillow floor is raised to a patched version, and tests cover version parsing plus warning paths.
-  Complexity: M
-
 - [ ] P1 - Add platform safe-zone overlays and export validation
   Why: TikTok, Meta Reels, and YouTube surfaces reserve UI overlay zones, while Vertigo lets captions/text overlays land without a platform-specific visibility check.
   Evidence: TikTok safe-zone docs; Meta safe-zone docs; Google Ads YouTube safe-zone docs; `ui/video_player.py`; `ui/overlays_panel.py`; `ui/subtitles_panel.py`; `core/presets.py`.

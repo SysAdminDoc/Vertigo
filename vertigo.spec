@@ -55,6 +55,10 @@ hiddenimports = (
         "PyQt6.QtMultimedia",
         "PyQt6.QtSvg",
         "PyQt6.QtSvgWidgets",
+        # NumPy 2.3+ imports this from extension code. Keep it explicit:
+        # machines with stale duplicate numpy dist-info can make the
+        # PyInstaller hook select an older metadata version and omit it.
+        "numpy._core._exceptions",
         # scenedetect loads detectors via string reference — force-bundle them
         "scenedetect.detectors.content_detector",
         "scenedetect.detectors.threshold_detector",
