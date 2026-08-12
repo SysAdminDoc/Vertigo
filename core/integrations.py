@@ -105,11 +105,11 @@ INTEGRATIONS: tuple[IntegrationDefinition, ...] = (
     IntegrationDefinition(
         id="object_tracking",
         label="Object/person tracking",
-        description="BoxMOT can extend tracking beyond the default face path.",
+        description="An opt-in OpenCV person/motion fallback extends tracking beyond the default face path; BoxMOT can stabilize IDs when installed.",
         packages=(("boxmot", "boxmot"),),
         credential_env=None,
         license_note="AGPL-3.0; review network-copyleft obligations for hosted use.",
-        fallback="Built-in lightweight MediaPipe face tracking and center crop.",
+        fallback="Built-in lightweight face tracking plus the opt-in HOG/motion fallback; center crop remains available.",
     ),
     IntegrationDefinition(
         id="silence_editor",

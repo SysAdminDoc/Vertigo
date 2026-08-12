@@ -22,7 +22,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Premium PyQt6 UI** — polished System / Mocha / Graphite / Latte themes, frameless custom titlebar, calm editor surfaces, refined focus states, accessible controls.
 - **Four reframe modes:**
   - **Center Crop** — static center column, zero analysis.
-  - **Smart Track** — MediaPipe face detection; viewport pans to follow subjects with smoothed, *scene-aware* keyframes that never cross a hard cut.
+  - **Smart Track** — MediaPipe face detection; viewport pans to follow subjects with smoothed, *scene-aware* keyframes that never cross a hard cut. An opt-in person/object fallback uses OpenCV's built-in HOG detector and motion contours when no face is found; it downloads no model weights.
   - **Blur Letterbox** — full source frame on a softly blurred backdrop.
   - **Manual** — drag the viewport on the live preview to lock any column.
 - **Platform presets** — YouTube Shorts, TikTok, Instagram Reels, Square (1:1). One click switches output geometry and encoder target bitrate.
@@ -64,7 +64,7 @@ pip install silero-vad                     # cherry-pick
 |---|---|---|---|
 | `core.vad` | Silero voice-activity detection → "tighten silences" trim | `silero-vad` (ONNX, <2 MB) | raises with clear install hint |
 | `core.animated_captions` | pycaps per-word animated caption overlays (pop / bounce / karaoke) | `pycaps` | keeps the ASS/SRT output |
-| `core.tracker_boxmot` | BoT-SORT / ByteTrack / DeepOCSORT speaker tracking with stable IDs across occlusion | `boxmot` (AGPL-3.0) | existing `SpeakerTracker` |
+| `core.tracker_boxmot` | BoT-SORT / ByteTrack / DeepOCSORT speaker tracking with stable IDs across occlusion | `boxmot` (AGPL-3.0) | existing `SpeakerTracker` plus the opt-in OpenCV person/object fallback |
 | `core.auto_edit` | Silence- and motion-driven cut planning from auto-editor | `auto-editor` CLI | raises with install hint |
 | `core.highlights` | Lighthouse moment retrieval with optional text query | `lighthouse-ml` | sliding-window `hook_score` fallback |
 | `core.cluster_track` | Per-frame face clustering + temporal-persistence filter (RetargetVid port) | none (numpy) | — |
@@ -96,7 +96,7 @@ sudo apt install ffmpeg
 1. Launch `python vertigo.py`.
 2. Drop a video on the preview area (or click to browse).
 3. Pick a platform preset (Shorts / TikTok / Reels / Square).
-4. Pick a reframe mode. For Smart Track, MediaPipe scans the clip and returns tracking keyframes.
+4. Pick a reframe mode. For Smart Track, MediaPipe scans the clip and returns tracking keyframes. If the clip has no faces, enable **Use person/object fallback when no face is found** in the Track panel to try the built-in person/motion detector.
 5. Click **Export Vertical** and choose an output path. Progress streams in the log panel.
 
 ## Architecture
@@ -113,7 +113,8 @@ core/
   crashlog.py             persistent breadcrumb log — survives frozen-build stderr drop
   probe.py                ffprobe wrapper (VideoInfo dataclass)
   presets.py              platform output presets (Shorts/TikTok/Reels/Square)
-  detect.py               MediaPipe face tracker (Haar fallback)
+  detect.py               MediaPipe face tracker (Haar fallback + opt-in object fallback)
+  object_tracking.py      dependency-free OpenCV HOG/motion fallback boxes
   cameraman.py            SmoothedCameraman + SpeakerTracker (Smart Track smoothing)
   scenes.py               scene detection (PySceneDetect + histogram fallback)
   cluster_track.py        RetargetVid temporal-persistence filter (pure numpy)

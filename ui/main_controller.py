@@ -851,7 +851,12 @@ class MainController(QObject):
             return
         if self.detect_worker and self.detect_worker.isRunning():
             return
-        w._set_detect_status("Scanning for faces\u2026", tone="accent")
+        subject_label = (
+            "faces and optional person/object fallback"
+            if w._object_fallback.isChecked()
+            else "faces"
+        )
+        w._set_detect_status(f"Scanning for {subject_label}\u2026", tone="accent")
         w._detect_progress.setValue(0)
         w._detect_progress.setFormat("Analysis %p%")
         w._detect_progress.show()
@@ -870,6 +875,7 @@ class MainController(QObject):
             sample_fps=2.0,
             smoothing=0.65,
             crop_width_frac=self._smart_track_crop_width_frac(),
+            use_object_fallback=w._object_fallback.isChecked(),
         )
         self.detect_worker.progress.connect(
             lambda v: w._detect_progress.setValue(int(v * 100))
@@ -886,13 +892,19 @@ class MainController(QObject):
         w._detect_progress.hide()
         if not points:
             w._set_detect_status(
-                "No faces detected \u2014 export will fall back to a stable center crop.",
+                "No subjects detected \u2014 export will fall back to a stable center crop.",
                 tone="warning",
             )
         else:
             extra = f" across {len(self.scenes)} scenes" if self.scenes else ""
+            fallback_note = (
+                " Face and person/object fallback are enabled."
+                if w._object_fallback.isChecked()
+                else ""
+            )
             w._set_detect_status(
-                f"Tracking {len(points)} keyframes{extra}. Export will follow the subject.",
+                f"Tracking {len(points)} keyframes{extra}. Export will follow the subject."
+                f"{fallback_note}",
                 tone="success",
             )
         if points:
@@ -2360,6 +2372,7 @@ class MainController(QObject):
             sample_fps=2.0,
             smoothing=0.65,
             crop_width_frac=self._smart_track_crop_width_frac(info=info),
+            use_object_fallback=w._object_fallback.isChecked(),
         )
         worker.progress.connect(lambda v: w._detect_progress.setValue(int(v * 100)))
 

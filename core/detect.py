@@ -46,9 +46,19 @@ class FaceTracker:
     Falls back to Haar cascade if MediaPipe is unavailable.
     """
 
-    def __init__(self, sample_fps: float = 2.0, smoothing: float = 0.6) -> None:
+    def __init__(
+        self,
+        sample_fps: float = 2.0,
+        smoothing: float = 0.6,
+        *,
+        use_object_fallback: bool = False,
+    ) -> None:
         self.sample_fps = max(0.25, sample_fps)
         self.smoothing = min(max(smoothing, 0.0), 0.95)
+        self._use_object_fallback = bool(use_object_fallback)
+        self._object_detector = None
+        if self._use_object_fallback:
+            self._object_detector = self._new_object_detector()
         # Tri-state: UNINITIALIZED → real object → DISABLED (permanently off).
         # Keeping it as a typed string sentinel (not None / False) makes the
         # hot-path check readable and prevents the accidental "try again on
@@ -61,7 +71,14 @@ class FaceTracker:
         video_path: str | Path,
         progress_cb=None,
         cancel_cb=None,
+        *,
+        use_object_fallback: bool | None = None,
     ) -> list[TrackPoint]:
+        fallback_enabled = (
+            self._use_object_fallback
+            if use_object_fallback is None
+            else bool(use_object_fallback)
+        )
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             return []
@@ -93,7 +110,12 @@ class FaceTracker:
                         break
                     continue
 
-                x_norm, conf = self._detect_center(frame, w, h)
+                x_norm, conf = self._detect_center(
+                    frame,
+                    w,
+                    h,
+                    use_object_fallback=fallback_enabled,
+                )
                 t = frame_idx / src_fps if src_fps else 0.0
 
                 if x_norm is None:
@@ -140,7 +162,13 @@ class FaceTracker:
         cancel_cb=None,
         *,
         use_cluster_filter: bool = False,
+        use_object_fallback: bool | None = None,
     ) -> list[TrackPoint]:
+        fallback_enabled = (
+            self._use_object_fallback
+            if use_object_fallback is None
+            else bool(use_object_fallback)
+        )
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             return []
@@ -193,7 +221,12 @@ class FaceTracker:
                         h=bh,
                         score=conf,
                     )
-                    for (bx, by, bw, bh, conf) in self._detect_boxes(frame, w, h)
+                    for (bx, by, bw, bh, conf) in self._detect_boxes(
+                        frame,
+                        w,
+                        h,
+                        use_object_fallback=fallback_enabled,
+                    )
                 ]
                 frames_obs.append(observations)
                 frame_indices.append(frame_idx)
@@ -263,17 +296,35 @@ class FaceTracker:
         return points
 
     # ------------------------------------------------------------------
-    def _detect_boxes(self, frame: np.ndarray, w: int, h: int):
+    def _detect_boxes(
+        self,
+        frame: np.ndarray,
+        w: int,
+        h: int,
+        *,
+        use_object_fallback: bool = False,
+    ):
         boxes = self._mediapipe_boxes(frame, w, h)
         if not boxes:
             boxes = self._haar_boxes(frame, w, h)
+        if not boxes and use_object_fallback:
+            boxes = self._object_boxes(frame, w, h)
         return boxes
 
-    def _detect_center(self, frame: np.ndarray, w: int, h: int) -> tuple[float | None, float]:
+    def _detect_center(
+        self,
+        frame: np.ndarray,
+        w: int,
+        h: int,
+        *,
+        use_object_fallback: bool = False,
+    ) -> tuple[float | None, float]:
         """Return (normalized_x_center, confidence) of the dominant subject, or (None, 0)."""
         boxes = self._mediapipe_boxes(frame, w, h)
         if not boxes:
             boxes = self._haar_boxes(frame, w, h)
+        if not boxes and use_object_fallback:
+            boxes = self._object_boxes(frame, w, h)
         if not boxes:
             return None, 0.0
 
@@ -281,6 +332,27 @@ class FaceTracker:
         bx, by, bw, bh, conf = max(boxes, key=lambda b: b[2] * b[3])
         cx = (bx + bw / 2) / w
         return float(cx), float(conf)
+
+    @staticmethod
+    def _new_object_detector():
+        try:
+            from .object_tracking import ObjectFallbackDetector
+
+            return ObjectFallbackDetector()
+        except Exception:
+            # The fallback is opt-in and must never make the face path fail
+            # when an OpenCV build lacks the optional HOG implementation.
+            return None
+
+    def _object_boxes(self, frame: np.ndarray, w: int, h: int):
+        if self._object_detector is None:
+            self._object_detector = self._new_object_detector()
+        if self._object_detector is None:
+            return []
+        try:
+            return self._object_detector.detect(frame, w, h)
+        except Exception:
+            return []
 
     def _mediapipe_boxes(self, frame: np.ndarray, w: int, h: int):
         # Fast path: detector has been permanently disabled (import failed
@@ -339,6 +411,12 @@ class FaceTracker:
         return [(float(x), float(y), float(bw), float(bh), 0.5) for (x, y, bw, bh) in faces]
 
     def close(self) -> None:
+        if self._object_detector is not None:
+            try:
+                self._object_detector.close()
+            except Exception:
+                pass
+            self._object_detector = None
         detector = self._mp_detector_state
         if detector is _MP_UNINITIALIZED or detector is _MP_DISABLED:
             return

@@ -473,7 +473,7 @@ class MainWindow(QMainWindow):
             ),
             ReframeMode.SMART_TRACK: ModeCard(
                 "smart_track", "Smart track",
-                "Tracks faces and respects hard scene cuts."
+                "Tracks faces, with an optional person/object fallback."
             ),
             ReframeMode.BLUR_LETTERBOX: ModeCard(
                 "blur_letterbox", "Blur letterbox",
@@ -553,6 +553,18 @@ class MainWindow(QMainWindow):
         self._detect_status.setObjectName("inlineNotice")
         self._detect_status.setWordWrap(True)
         lay.addWidget(self._detect_status)
+
+        self._object_fallback = QCheckBox(
+            "Use person/object fallback when no face is found"
+        )
+        self._object_fallback.setAccessibleName(
+            "Toggle person and object tracking fallback"
+        )
+        self._object_fallback.setToolTip(
+            "Opt-in only: use OpenCV's built-in person detector and a motion fallback "
+            "when face tracking has no result. No model weights are downloaded."
+        )
+        lay.addWidget(self._object_fallback)
 
         self._detect_progress = QProgressBar()
         self._detect_progress.setRange(0, 100)

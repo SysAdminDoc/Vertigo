@@ -37,6 +37,7 @@ class DetectWorker(QThread):
         *,
         crop_width_frac: float | None = None,
         use_cluster_filter: bool = True,
+        use_object_fallback: bool = False,
     ) -> None:
         super().__init__()
         self._path = Path(video_path)
@@ -44,13 +45,18 @@ class DetectWorker(QThread):
         self._smoothing = smoothing
         self._crop_width_frac = crop_width_frac
         self._use_cluster_filter = use_cluster_filter
+        self._use_object_fallback = bool(use_object_fallback)
         self._cancel = False
 
     def cancel(self) -> None:
         self._cancel = True
 
     def run(self) -> None:
-        tracker = FaceTracker(sample_fps=self._sample_fps, smoothing=self._smoothing)
+        tracker = FaceTracker(
+            sample_fps=self._sample_fps,
+            smoothing=self._smoothing,
+            use_object_fallback=self._use_object_fallback,
+        )
         try:
             if self._crop_width_frac is not None and 0 < self._crop_width_frac <= 1.0:
                 points = tracker.track_with_cameraman(

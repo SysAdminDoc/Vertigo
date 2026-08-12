@@ -4,6 +4,10 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Opt-in person/object Smart Track fallback.** The Track panel can now use
+  OpenCV's built-in HOG person detector and bounded motion contours when face
+  detection has no result. The default face/Haar path is unchanged, no model
+  weights are downloaded, and failures fall back to the existing center crop.
 - **Accessible PyQt surface.** Interactive controls across the preview, export,
   captions, overlays, queue, and output panels now expose stable accessible
   names; the live workspace smoke test also checks focusability, dynamic rows,
