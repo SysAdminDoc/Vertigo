@@ -57,11 +57,49 @@ class SubtitleWorker(QThread):
         self._letterbox = letterbox
         self._force_word_level = force_word_level
         self._cancel = False
+        self._output_candidates = self._build_output_candidates()
+        self._preexisting_outputs = {
+            path for path in self._output_candidates if path.exists()
+        }
 
     def cancel(self) -> None:
         self._cancel = True
 
+    def _build_output_candidates(self) -> tuple[Path, Path]:
+        stem = self._source.stem
+        return (
+            self._out_dir / f"{stem}.vertigo.srt",
+            self._out_dir / f"{stem}.vertigo.ass",
+        )
+
+    def _cleanup_partial(self, output_path: Path | None = None) -> None:
+        """Remove sidecars created by this run and any atomic-write temp.
+
+        Existing captions are user data and must survive a cancelled or
+        failed refresh.  The atomic writer protects those files from a
+        failed replacement; this worker cleanup handles newly-created
+        files and temp siblings from either writer or a third-party mock.
+        """
+        paths = set(self._output_candidates)
+        if output_path is not None:
+            paths.add(Path(output_path))
+        for path in paths:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if path in self._preexisting_outputs:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def run(self) -> None:
+        if self._cancel:
+            self.failed.emit(WORKER_CANCELLED_MSG)
+            return
         try:
             face_note = "  \u00b7  face-aware layout" if self._face_aware and not self._letterbox else ""
             word_note = (
@@ -88,6 +126,7 @@ class SubtitleWorker(QThread):
                 cancel_cb=lambda: self._cancel,
             )
             if self._cancel:
+                self._cleanup_partial(Path(result.path))
                 self.failed.emit(WORKER_CANCELLED_MSG)
                 return
             # Hand the caption list out so the controller can cache it
@@ -95,6 +134,7 @@ class SubtitleWorker(QThread):
             self.captions_ready.emit(list(result.captions))
             self.finished_ok.emit(str(result.path))
         except Exception as e:
+            self._cleanup_partial()
             if self._cancel:
                 self.failed.emit(WORKER_CANCELLED_MSG)
             else:

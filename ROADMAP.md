@@ -4,14 +4,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 
 ## Actionable Items
 
-- [ ] **R10 · Worker-output scrub parity audit** · next pass
-  Re-check `subtitle_worker`, `highlights_worker`, and
-  `auto_edit_worker` for partial-output cleanup parity with
-  `encode_worker` / `pycaps_worker`, especially cancel and exception
-  branches that could leave temp files next to user exports.
-
----
-
 - [ ] Hardware-encoder auto-detect across **4 backends** (NVENC / QSV /
   AMF / VideoToolbox). Autocrop-vertical has 2; openshorts has 0.
 

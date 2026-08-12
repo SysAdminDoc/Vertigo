@@ -87,6 +87,9 @@ models/
 *.md
 !README.md
 
+# The release history is intentionally tracked.
+!CHANGELOG.md
+
 # AI config
 AGENTS.md
 .claude/

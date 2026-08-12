@@ -12,10 +12,11 @@ Output format is chosen by the active caption preset:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .caption_layout import ALIGN_BOTTOM_CENTER, ALIGN_TOP_CENTER, plan_alignments
+from .caption_layout import ALIGN_BOTTOM_CENTER, plan_alignments
 from .caption_styles import CaptionPreset, default_preset, style_for_height
 from .caption_types import Caption, Word  # re-exported for binary compat
 from .face_samples import FaceSample, sample_faces
@@ -124,8 +125,7 @@ def write_srt(captions: list[Caption], out_path: Path) -> Path:
         lines.append(f"{_fmt_srt(c.start)} --> {_fmt_srt(c.end)}")
         lines.append(_wrap(c.text))
         lines.append("")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(lines), encoding="utf-8")
+    _atomic_write_text(out_path, "\n".join(lines))
     return out_path
 
 
@@ -186,8 +186,7 @@ def write_ass(
             body = f"{{\\an{align}}}{body}"
         dialogues.append(_ass_dialogue(start, end, body))
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(header + "\n".join(dialogues) + "\n", encoding="utf-8")
+    _atomic_write_text(out_path, header + "\n".join(dialogues) + "\n")
     return out_path
 
 
@@ -291,18 +290,30 @@ def transcribe_and_write(
 
     want_ass = (preset.animation == "karaoke" and any(c.words for c in captions)) or face_aware
     if want_ass:
+        path = out_dir / f"{stem}.vertigo.ass"
+    else:
+        # Non-karaoke presets without face-aware use SRT; libass will
+        # still apply force_style from the preset at burn-in time.
+        path = out_dir / f"{stem}.vertigo.srt"
+
+    # Whisper can return a partial caption list when cancellation fires.
+    # Do not publish that list as a sidecar after the last segment loop.
+    # The worker removes any newly-created output as a second line of
+    # defence, but this check avoids replacing an existing sidecar at all.
+    if cancel_cb and cancel_cb():
+        return TranscribeResult(path=path, captions=captions)
+
+    if want_ass:
         path = write_ass(
             captions,
-            out_dir / f"{stem}.vertigo.ass",
+            path,
             preset,
             height_px,
             face_samples=face_samples,
             letterbox=letterbox,
         )
     else:
-        # Non-karaoke presets without face-aware use SRT; libass will
-        # still apply force_style from the preset at burn-in time.
-        path = write_srt(captions, out_dir / f"{stem}.vertigo.srt")
+        path = write_srt(captions, path)
     return TranscribeResult(path=path, captions=captions)
 
 
@@ -318,6 +329,26 @@ def _fmt_srt(t: float) -> str:
         s += 1
         ms = 0
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write a subtitle sidecar without exposing a half-written file.
+
+    The temporary file lives beside the final path so ``os.replace`` is
+    atomic on the same filesystem.  Always remove it on failure; a failed
+    caption pass must not leave ``.srt.tmp`` / ``.ass.tmp`` litter beside
+    the user's source video.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _fmt_ass(t: float) -> str:
