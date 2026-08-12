@@ -35,6 +35,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Hardware encoding** — auto-detects NVIDIA NVENC, Intel QuickSync, AMD AMF, Apple VideoToolbox, and the libx264/libx265 CPU encoders. Pick one in the Output tab, drive a single quality slider, tune the speed preset.
 - **Media security preflight** — reports the active FFmpeg and Pillow versions at startup, warns on stale FFmpeg release branches, and blocks exports when Pillow is below the patched 12.2.0 floor or either version cannot be verified.
 - **Platform safe zones** — preview approximate TikTok, Instagram Reels, and YouTube Shorts UI-clearance guides, toggle them on demand, and get export-time warnings when captions or overlays cross a critical-text boundary.
+- **Resumable batch exports** — each queue run writes a local atomic manifest with its recipe, per-clip status, final destination, and hidden partial path; a relaunch offers Resume or Discard without uploading project data anywhere.
 - **AI captions** — optional faster-whisper transcription (opt-in lazy install) with SRT burn-in. Word-wrapped, mobile-safe styling baked directly into the exported pixels.
 - **Text overlays** — title cards, top straps, lower-thirds, and bottom captions. Per-overlay time range, color, and font size. Preset library for common Shorts/Reels motifs. All burned into the output via `drawtext=` filter chain.
 - **Live crop viewport** overlaid on the preview player so you see the target frame before rendering.
@@ -122,6 +123,7 @@ core/
   encode.py               FFmpeg subprocess + progress parsing + trim + burn-in
   preflight.py            VFR corrections + FFmpeg/Pillow security preflight
   safe_zones.py           Platform guide geometry + caption/overlay validation
+  job_manifest.py         Atomic local batch recipe/progress persistence
   dryrun.py               plan-only report (TRACK / LETTERBOX / CENTER strategy)
   hook_score.py           0-100 first-3-second engagement score (no torch)
   segment_proposals.py    T3b — local TextTiling segmenter + silence-gap + length-fit ranker

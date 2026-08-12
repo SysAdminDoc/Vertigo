@@ -7,6 +7,7 @@ it for preview; the queue driver in MainWindow runs them in order.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -258,8 +259,14 @@ class BatchQueue(QWidget):
         self._refresh_empty_state()
 
     # ---------------------------------------------- public api
-    def add(self, path: Path) -> QueueEntry:
-        entry = QueueEntry(path=Path(path))
+    def add(
+        self,
+        path: Path,
+        *,
+        status: QueueStatus = QueueStatus.PENDING,
+        message: str = "",
+    ) -> QueueEntry:
+        entry = QueueEntry(path=Path(path), status=status, message=message)
         self._entries.append(entry)
         item = QueueItem(entry)
         item.selected.connect(self._on_item_selected)
@@ -268,6 +275,26 @@ class BatchQueue(QWidget):
         self._list_lay.insertWidget(self._list_lay.count() - 1, item)
         self._refresh_empty_state()
         return entry
+
+    def restore(
+        self,
+        entries: Iterable[tuple[Path, QueueStatus, str]],
+        *,
+        select_first: bool = True,
+    ) -> list[QueueEntry]:
+        """Replace the queue from a manifest and optionally select its first item."""
+        self.clear()
+        restored = [
+            self.add(path, status=status, message=message)
+            for path, status, message in entries
+        ]
+        if select_first and restored:
+            candidate = next(
+                (entry for entry in restored if entry.status is QueueStatus.PENDING),
+                restored[0],
+            )
+            self.select(candidate.id)
+        return restored
 
     def update_status(self, entry_id: int, status: QueueStatus, message: str = "") -> None:
         for e in self._entries:

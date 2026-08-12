@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Resumable batch/export manifests.** Batch runs now persist their selected
+  preset, mode, trim, output options, per-clip status, final paths, and hidden
+  `.part` paths in an atomic local JSON ledger. Relaunch offers Resume or
+  Discard, and cancellation/failed runs scrub recorded partial files without
+  touching completed exports.
 - **Platform safe-zone guides.** Output presets now carry conservative
   TikTok, Instagram Reels, YouTube Shorts, and square title-safe metadata.
   The preview can show or hide the selected guide, and caption/overlay text

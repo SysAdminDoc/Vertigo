@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P1 - Persist resumable batch/export job manifests
-  Why: OSS competitors show long-run failures around missing metadata and failed jobs, and Vertigo's queue/export state is currently in-memory during multi-clip work.
-  Evidence: OpenShorts issue list; `ui/batch_queue.py`; `ui/main_controller.py`; `core/crashlog.py`.
-  Touches: `ui/batch_queue.py`, `ui/main_controller.py`, `core/crashlog.py`, new non-markdown manifest helper under `core/`, `tests/`.
-  Acceptance: Starting a batch writes a local manifest with entries, selected preset/mode/trim/options, temp outputs, and status; relaunch detects an incomplete manifest and offers resume/discard inside the app; cancel/failure cleans partial files consistently.
-  Complexity: L
-
 - [ ] P1 - Add optional integration readiness panel
   Why: `core.diarize` and `core.broll` are importable but hidden behind HF/Pexels/model prerequisites, while commercial tools make b-roll, speaker-aware edits, and captions obvious product surfaces.
   Evidence: OpusClip API/features; Submagic b-roll; Vizard features; pyannote speaker-diarization model card; `core/diarize.py`; `core/broll.py`; existing ROADMAP T4b and b-roll partial items.

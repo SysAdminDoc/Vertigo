@@ -45,12 +45,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QObject, Qt, QUrl
+from PyQt6.QtCore import QObject, QTimer, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QFontMetrics
 from PyQt6.QtWidgets import QMenu, QMessageBox
 
 from core import crashlog
 from core.encode import EncodeJob
+from core.job_manifest import (
+    BatchManifest,
+    ManifestEntry,
+    cleanup_partial_outputs,
+    discard as discard_manifest,
+    load as load_manifest,
+    save as save_manifest,
+)
 from core.preflight import inspect_media_dependencies
 from core.probe import VideoInfo, probe
 from core.reframe import ReframeMode, build_plan
@@ -130,6 +138,10 @@ class MainController(QObject):
         # batch driver state
         self.batch_running: bool = False
         self.batch_out_dir: Path | None = None
+        self.batch_manifest: BatchManifest | None = None
+        self._batch_manifest_entries: dict[int, ManifestEntry] = {}
+        self._batch_final_outputs: dict[int, Path] = {}
+        self._active_batch_entry_id: int | None = None
         self.suppress_auto_detect: bool = False
 
         # export output tracking
@@ -163,6 +175,9 @@ class MainController(QObject):
         w._player.segments_btn.clicked.connect(self.run_suggest_segments)
         w._player.trim_silences_btn.clicked.connect(self.run_trim_silences)
         w._export_thumbs_btn.clicked.connect(self.export_thumbnails)
+        # The window must be fully constructed before a recovery dialog can
+        # safely offer Resume or Discard.
+        QTimer.singleShot(0, self.offer_incomplete_manifest)
 
     # --------------------------------------------------------------- status
     def has_running_worker(self) -> bool:
@@ -192,6 +207,8 @@ class MainController(QObject):
         stderr drop.
         """
         self.cancel_active()
+        if self.batch_manifest is not None and self.batch_manifest.incomplete:
+            self._interrupt_manifest("app closed before batch completion")
         if self.scene_worker is not None and self.scene_worker.isRunning():
             self.scene_worker.cancel()
         for worker in (
@@ -910,8 +927,18 @@ class MainController(QObject):
         )
         return answer == QMessageBox.StandardButton.Yes
 
-    def _run_encode_job(self, info: VideoInfo, out_path: Path, entry: QueueEntry | None) -> None:
+    def _run_encode_job(
+        self,
+        info: VideoInfo,
+        out_path: Path,
+        entry: QueueEntry | None,
+        *,
+        final_output_path: Path | None = None,
+    ) -> None:
         w = self.win
+        if entry is not None and final_output_path is not None:
+            self._batch_final_outputs[entry.id] = Path(final_output_path)
+            self._active_batch_entry_id = entry.id
         if self.detect_worker and self.detect_worker.isRunning():
             w._toast.show_toast("Wait for analysis to finish before exporting.", kind="warning")
             return
@@ -927,7 +954,14 @@ class MainController(QObject):
             if self.batch_running:
                 if entry:
                     w._queue.update_status(entry.id, QueueStatus.FAILED, "media security preflight")
+                    self._set_manifest_entry(
+                        entry.id,
+                        status="failed",
+                        message="media security preflight",
+                    )
                 self.batch_running = False
+                self._interrupt_manifest("media security preflight blocked the batch")
+                self._active_batch_entry_id = None
                 self._reset_export_ui()
             return
         if media_report.blockers:
@@ -940,7 +974,14 @@ class MainController(QObject):
             if self.batch_running:
                 if entry:
                     w._queue.update_status(entry.id, QueueStatus.FAILED, "media security preflight")
+                    self._set_manifest_entry(
+                        entry.id,
+                        status="failed",
+                        message="media security preflight",
+                    )
                 self.batch_running = False
+                self._interrupt_manifest("media security preflight blocked the batch")
+                self._active_batch_entry_id = None
                 self._reset_export_ui()
             return
         if media_report.warnings:
@@ -978,6 +1019,11 @@ class MainController(QObject):
             )
         except Exception as e:
             w._toast.show_toast(f"Could not prepare export: {e}", kind="error")
+            if entry is not None and self.batch_running:
+                w._queue.update_status(entry.id, QueueStatus.FAILED, f"prepare: {e}")
+                self._set_manifest_entry(entry.id, status="failed", message=f"prepare: {e}")
+                self._active_batch_entry_id = None
+                self._advance_batch()
             return
 
         trim_end = w._trim_high if w._trim_high and w._trim_high < info.duration else None
@@ -1022,6 +1068,7 @@ class MainController(QObject):
 
         if entry:
             w._queue.update_status(entry.id, QueueStatus.ACTIVE, "encoding\u2026")
+            self._set_manifest_entry(entry.id, status="active", message="encoding\u2026")
 
         w._log.clear()
         w._log.show()
@@ -1333,8 +1380,21 @@ class MainController(QObject):
             )
         self._finish_export_done(reframed_out, entry_id)
 
+    def _promote_batch_output(self, out_path: Path, entry_id: int | None) -> Path:
+        """Atomically move a successful hidden batch part to its final name."""
+        final_path = self._batch_final_outputs.pop(entry_id, None) if entry_id is not None else None
+        if final_path is None or final_path == out_path:
+            return out_path
+        try:
+            out_path.replace(final_path)
+            return final_path
+        except OSError as exc:
+            self._append_log(f"[warn] Could not promote batch output: {exc}")
+            return out_path
+
     def _finish_export_done(self, out_path: Path, entry_id: int | None) -> None:
         w = self.win
+        out_path = self._promote_batch_output(out_path, entry_id)
         self.last_output_path = out_path
         w._export_progress.setValue(100)
         self.win._set_export_status("Complete", tone="success")
@@ -1343,6 +1403,8 @@ class MainController(QObject):
         w._toast.show_toast(f"Exported {out_path.name}", kind="success")
         if entry_id is not None:
             w._queue.update_status(entry_id, QueueStatus.DONE, "exported")
+            self._set_manifest_entry(entry_id, status="done", message="exported")
+            self._active_batch_entry_id = None
         w._refresh_queue_count()
         w._refresh_overview()
         if self.batch_running:
@@ -1357,7 +1419,21 @@ class MainController(QObject):
         self.win._set_export_status("Cancelled" if cancelled else "Export failed", tone="warning")
         w._toast.show_toast(msg, kind="warning" if cancelled else "error")
         if entry_id is not None:
-            w._queue.update_status(entry_id, QueueStatus.FAILED, msg)
+            w._queue.update_status(
+                entry_id,
+                QueueStatus.PENDING if cancelled else QueueStatus.FAILED,
+                msg,
+            )
+            if cancelled:
+                self._set_manifest_entry(
+                    entry_id,
+                    status="pending",
+                    message="cancelled; ready to resume",
+                )
+            else:
+                self._set_manifest_entry(entry_id, status="failed", message=msg)
+            self._batch_final_outputs.pop(entry_id, None)
+            self._active_batch_entry_id = None
         w._refresh_queue_count()
         w._refresh_overview()
         if self.batch_running:
@@ -1378,6 +1454,7 @@ class MainController(QObject):
         if not (has_encode or has_detect or has_subs or has_vad or has_hl or has_ae or has_pc or has_seg):
             return
         self.batch_running = False
+        self._interrupt_manifest("cancelled; ready to resume")
         w._cancel_btn.setEnabled(False)
         self.win._set_export_status("Cancelling\u2026", tone="warning")
         if has_encode and self.encode_worker:
@@ -1417,6 +1494,285 @@ class MainController(QObject):
         w._drop.setEnabled(not busy)
         w._export_btn.setEnabled(not busy and w._info is not None)
 
+    # --------------------------------------------------------------- manifest
+    def _batch_options(self) -> dict:
+        """Capture only JSON-safe settings needed to reproduce a batch."""
+        w = self.win
+        output = w._output_choice
+        subtitles = w._subtitle_choice
+        return {
+            "manual_x": float(w._manual_x),
+            "adjustments": {
+                "brightness": float(w._adjustments.brightness),
+                "contrast": float(w._adjustments.contrast),
+                "saturation": float(w._adjustments.saturation),
+            },
+            "output": {
+                "encoder_id": output.encoder.id if output and output.encoder else None,
+                "quality": int(output.quality) if output else 75,
+                "speed_preset": output.speed_preset if output else None,
+            },
+            "subtitles": {
+                "burn_in": bool(subtitles and subtitles.burn_in),
+                "model": subtitles.model if subtitles else None,
+                "language": subtitles.language if subtitles else None,
+                "preset_id": subtitles.preset_id if subtitles else "pop",
+                "face_aware": bool(subtitles and subtitles.face_aware),
+            },
+            "overlays": [
+                {
+                    "text": overlay.text,
+                    "start": float(overlay.start),
+                    "end": float(overlay.end),
+                    "position": overlay.position.value,
+                    "size": int(overlay.size),
+                    "color": overlay.color,
+                    "background": bool(overlay.background),
+                    "background_color": overlay.background_color,
+                    "background_alpha": float(overlay.background_alpha),
+                    "stroke": bool(overlay.stroke),
+                    "stroke_color": overlay.stroke_color,
+                    "stroke_width": int(overlay.stroke_width),
+                }
+                for overlay in w._overlays
+            ],
+        }
+
+    def _save_batch_manifest(self) -> None:
+        if self.batch_manifest is None:
+            return
+        try:
+            save_manifest(self.batch_manifest)
+        except Exception as exc:
+            crashlog.append(f"batch manifest save failed: {type(exc).__name__}: {exc}")
+
+    def _manifest_entry(self, entry_id: int | None) -> ManifestEntry | None:
+        if entry_id is None:
+            return None
+        return self._batch_manifest_entries.get(entry_id)
+
+    def _set_manifest_entry(
+        self,
+        entry_id: int | None,
+        *,
+        status: str,
+        message: str = "",
+        output_path: Path | None = None,
+        temp_output_path: Path | None = None,
+    ) -> None:
+        manifest_entry = self._manifest_entry(entry_id)
+        if manifest_entry is None:
+            return
+        manifest_entry.status = status
+        manifest_entry.message = message
+        if output_path is not None:
+            manifest_entry.output_path = Path(output_path)
+        if temp_output_path is not None:
+            manifest_entry.temp_output_path = Path(temp_output_path)
+        elif status == "done":
+            manifest_entry.temp_output_path = None
+        self._save_batch_manifest()
+
+    def _batch_output_paths(self, entry: QueueEntry) -> tuple[Path, Path]:
+        assert self.batch_out_dir is not None
+        final = self.batch_out_dir / f"{entry.path.stem}_{self.win._preset.id}.mp4"
+        if self.batch_manifest is None:
+            return final, final
+        temp = final.with_name(
+            f".vertigo-{self.batch_manifest.batch_id}-{final.stem}.part{final.suffix}"
+        )
+        return final, temp
+
+    def _new_batch_manifest(self, pending: list[QueueEntry]) -> BatchManifest:
+        w = self.win
+        assert self.batch_out_dir is not None
+        manifest = BatchManifest.new(
+            output_dir=self.batch_out_dir,
+            preset_id=w._preset.id,
+            mode=w._mode.value,
+            trim_low=w._trim_low,
+            trim_high=w._trim_high,
+            options=self._batch_options(),
+            entries=[ManifestEntry(source_path=entry.path) for entry in pending],
+        )
+        self.batch_manifest = manifest
+        self._batch_manifest_entries = {
+            entry.id: manifest_entry
+            for entry, manifest_entry in zip(pending, manifest.entries)
+        }
+        for entry in pending:
+            final, temp = self._batch_output_paths(entry)
+            manifest_entry = self._batch_manifest_entries[entry.id]
+            manifest_entry.output_path = final
+            manifest_entry.temp_output_path = temp
+        self._save_batch_manifest()
+        return manifest
+
+    def offer_incomplete_manifest(self) -> None:
+        """Offer recovery for a batch left running by a prior app session."""
+        if self.batch_running or self.batch_manifest is not None:
+            return
+        manifest = load_manifest()
+        if manifest is None or not manifest.incomplete:
+            return
+
+        box = QMessageBox(self.win)
+        box.setWindowTitle("Resume batch export?")
+        box.setText("Vertigo found an unfinished batch export.")
+        box.setInformativeText(
+            f"{len(manifest.pending_entries)} clip(s) still need work in "
+            f"{manifest.output_dir}. Resume the remaining items or discard "
+            "the saved batch state and its partial files?"
+        )
+        resume = box.addButton("Resume", QMessageBox.ButtonRole.AcceptRole)
+        discard = box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is resume:
+            self._resume_manifest(manifest)
+        elif box.clickedButton() is discard:
+            self._discard_manifest(manifest)
+
+    def _resume_manifest(self, manifest: BatchManifest) -> None:
+        w = self.win
+        self.batch_manifest = manifest
+        self.batch_out_dir = manifest.output_dir
+        self._batch_manifest_entries = {}
+        restored_specs: list[tuple[Path, QueueStatus, str]] = []
+        for manifest_entry in manifest.entries:
+            output_exists = bool(
+                manifest_entry.status == "done"
+                and manifest_entry.output_path
+                and manifest_entry.output_path.exists()
+            )
+            if output_exists:
+                manifest_entry.status = "done"
+                manifest_entry.message = "exported before restart"
+                queue_status = QueueStatus.DONE
+                message = "exported before restart"
+            elif not manifest_entry.source_path.exists():
+                manifest_entry.status = "failed"
+                manifest_entry.message = "source file is missing"
+                queue_status = QueueStatus.FAILED
+                message = "source file is missing"
+            else:
+                manifest_entry.status = "pending"
+                manifest_entry.message = "ready to resume"
+                queue_status = QueueStatus.PENDING
+                message = "ready to resume"
+            restored_specs.append((manifest_entry.source_path, queue_status, message))
+
+        restored = w._queue.restore(restored_specs, select_first=False)
+        for entry, manifest_entry in zip(restored, manifest.entries):
+            self._batch_manifest_entries[entry.id] = manifest_entry
+        self._restore_batch_options(manifest.options)
+        manifest.state = "running"
+        manifest.touch()
+        self._save_batch_manifest()
+        self.batch_running = True
+        w._toast.show_toast(
+            f"Resuming batch: {len(w._queue.pending_entries())} clips remain", kind="info"
+        )
+        w._refresh_queue_count()
+        w._refresh_progress_hint()
+        w._refresh_overview()
+        self._advance_batch()
+
+    def _restore_batch_options(self, options: dict) -> None:
+        w = self.win
+        try:
+            from core.overlays import OverlayPosition, TextOverlay
+            from core.reframe import Adjustments, ReframeMode
+
+            preset_id = self.batch_manifest.preset_id if self.batch_manifest else "shorts"
+            if preset_id in getattr(w, "_preset_buttons", {}):
+                w._choose_preset(preset_id)
+            mode_value = self.batch_manifest.mode if self.batch_manifest else "center"
+            self.suppress_auto_detect = True
+            try:
+                w._on_mode_changed(ReframeMode(mode_value))
+            finally:
+                self.suppress_auto_detect = False
+
+            w._manual_x = float(options.get("manual_x", 0.5))
+            w._player.set_manual_x(w._manual_x)
+            adjustments = options.get("adjustments") or {}
+            w._adjustments = Adjustments(
+                brightness=float(adjustments.get("brightness", 0.0)),
+                contrast=float(adjustments.get("contrast", 1.0)),
+                saturation=float(adjustments.get("saturation", 1.0)),
+            )
+
+            output = options.get("output") or {}
+            choice = w._output_choice
+            encoder = choice.encoder if choice else None
+            encoder_id = output.get("encoder_id")
+            if encoder_id and hasattr(w, "_output_panel"):
+                encoder = next(
+                    (
+                        candidate
+                        for candidate in w._output_panel._encoders
+                        if candidate.id == encoder_id
+                    ),
+                    encoder,
+                )
+            from .output_panel import OutputChoice
+
+            w._output_choice = OutputChoice(
+                encoder=encoder,
+                quality=int(output.get("quality", choice.quality if choice else 75)),
+                speed_preset=output.get("speed_preset", choice.speed_preset if choice else None),
+            )
+            if hasattr(w, "_output_panel"):
+                w._output_panel.set_selection(w._output_choice)
+
+            restored_overlays = []
+            for raw in options.get("overlays") or []:
+                restored_overlays.append(
+                    TextOverlay(
+                        text=str(raw.get("text", "")),
+                        start=float(raw.get("start", 0.0)),
+                        end=float(raw.get("end", 3.0)),
+                        position=OverlayPosition(str(raw.get("position", "title"))),
+                        size=int(raw.get("size", 72)),
+                        color=str(raw.get("color", "#ffffff")),
+                        background=bool(raw.get("background", True)),
+                        background_color=str(raw.get("background_color", "#11111b")),
+                        background_alpha=float(raw.get("background_alpha", 0.55)),
+                        stroke=bool(raw.get("stroke", True)),
+                        stroke_color=str(raw.get("stroke_color", "#11111b")),
+                        stroke_width=int(raw.get("stroke_width", 3)),
+                    )
+                )
+            w._overlays = restored_overlays
+            w._trim_low = self.batch_manifest.trim_low if self.batch_manifest else 0.0
+            w._trim_high = self.batch_manifest.trim_high if self.batch_manifest else 0.0
+            w._refresh_platform_notice()
+            w._refresh_overview()
+        except (TypeError, ValueError, KeyError) as exc:
+            crashlog.append(f"batch manifest options partially ignored: {exc}")
+
+    def _discard_manifest(self, manifest: BatchManifest) -> None:
+        removed = cleanup_partial_outputs(manifest)
+        discard_manifest()
+        self.batch_manifest = None
+        self._batch_manifest_entries.clear()
+        self.win._toast.show_toast(
+            f"Discarded unfinished batch state ({len(removed)} partial file(s) removed).",
+            kind="info",
+        )
+
+    def _interrupt_manifest(self, reason: str = "interrupted") -> None:
+        if self.batch_manifest is None:
+            return
+        active = self._manifest_entry(self._active_batch_entry_id)
+        if active is not None and active.status == "active":
+            active.status = "pending"
+            active.message = reason
+        self.batch_manifest.state = "interrupted"
+        self.batch_manifest.touch()
+        self._save_batch_manifest()
+
     # --------------------------------------------------------------- batch
     def start_batch_export(self) -> None:
         from .file_dialogs import get_existing_directory
@@ -1430,6 +1786,7 @@ class MainController(QObject):
         if not out_dir:
             return
         self.batch_out_dir = Path(out_dir)
+        self._new_batch_manifest(pending)
         self.batch_running = True
         w._toast.show_toast(f"Batch export started: {len(pending)} clips", kind="info")
         w._refresh_progress_hint()
@@ -1444,6 +1801,11 @@ class MainController(QObject):
         pending = w._queue.pending_entries()
         if not pending:
             self.batch_running = False
+            if self.batch_manifest is not None:
+                self.batch_manifest.state = "complete"
+                self.batch_manifest.touch()
+                self._save_batch_manifest()
+            self._active_batch_entry_id = None
             self.win._set_export_status("Batch complete", tone="success")
             if self.batch_out_dir is not None:
                 self.last_output_path = self.batch_out_dir
@@ -1452,6 +1814,15 @@ class MainController(QObject):
             self._reset_export_ui()
             return
         entry = pending[0]
+        self._active_batch_entry_id = entry.id
+        final_out, temp_out = self._batch_output_paths(entry)
+        self._set_manifest_entry(
+            entry.id,
+            status="active",
+            message="preparing",
+            output_path=final_out,
+            temp_output_path=temp_out,
+        )
         self.suppress_auto_detect = True
         try:
             w._queue.select(entry.id)
@@ -1461,25 +1832,39 @@ class MainController(QObject):
             info = probe(entry.path)
         except Exception as e:
             w._queue.update_status(entry.id, QueueStatus.FAILED, f"probe: {e}")
+            self._set_manifest_entry(entry.id, status="failed", message=f"probe: {e}")
             self._advance_batch()
             return
         w._info = info
         w._current_entry = entry
-        w._trim_low = 0.0
-        w._trim_high = info.duration
+        if self.batch_manifest and self.batch_manifest.trim_high > 0:
+            w._trim_low = min(max(0.0, self.batch_manifest.trim_low), info.duration)
+            w._trim_high = min(max(w._trim_low, self.batch_manifest.trim_high), info.duration)
+        else:
+            w._trim_low = 0.0
+            w._trim_high = info.duration
         w._refresh_platform_notice()
         w._refresh_overview()
         if w._mode is ReframeMode.SMART_TRACK:
             # For batch we re-detect per clip. Kick detect then encode when done.
             self.scenes = []
             self.track_points = []
-            self._run_detect_then_encode(info, entry)
+            self._run_detect_then_encode(info, entry, final_out, temp_out)
         else:
-            assert self.batch_out_dir is not None  # set in start_batch_export
-            out = self.batch_out_dir / f"{info.path.stem}_{w._preset.id}.mp4"
-            self._run_encode_job(info, out, entry)
+            self._run_encode_job(
+                info,
+                temp_out,
+                entry,
+                final_output_path=final_out,
+            )
 
-    def _run_detect_then_encode(self, info: VideoInfo, entry: QueueEntry) -> None:
+    def _run_detect_then_encode(
+        self,
+        info: VideoInfo,
+        entry: QueueEntry,
+        final_output_path: Path,
+        temp_output_path: Path,
+    ) -> None:
         w = self.win
         w._set_detect_status(f"Batch analysis: {entry.path.name}", tone="accent")
         w._detect_progress.setValue(0)
@@ -1503,13 +1888,18 @@ class MainController(QObject):
             w._detect_progress.hide()
             w._refresh_detection_actions()
             w._refresh_overview()
-            assert self.batch_out_dir is not None
-            out = self.batch_out_dir / f"{info.path.stem}_{w._preset.id}.mp4"
-            self._run_encode_job(info, out, entry)
+            self._run_encode_job(
+                info,
+                temp_output_path,
+                entry,
+                final_output_path=final_output_path,
+            )
 
         def _fail(msg):
             w._detect_progress.hide()
             w._queue.update_status(entry.id, QueueStatus.FAILED, f"detect: {msg}")
+            self._set_manifest_entry(entry.id, status="failed", message=f"detect: {msg}")
+            self._active_batch_entry_id = None
             w._refresh_detection_actions()
             w._refresh_overview()
             self._advance_batch()

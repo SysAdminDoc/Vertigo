@@ -143,6 +143,21 @@ class OutputPanel(QWidget):
         speed = self._speed_combo.currentData()
         return OutputChoice(encoder=enc, quality=self._quality.value(), speed_preset=speed)
 
+    def set_selection(self, choice: OutputChoice) -> None:
+        """Restore a saved selection without requiring the caller to touch widgets."""
+        if choice.encoder is not None:
+            idx = next(
+                (i for i, encoder in enumerate(self._encoders) if encoder.id == choice.encoder.id),
+                -1,
+            )
+            if idx >= 0:
+                self._encoder_combo.setCurrentIndex(idx)
+        self._quality.setValue(max(1, min(100, int(choice.quality))))
+        if choice.speed_preset:
+            idx = self._speed_combo.findData(choice.speed_preset)
+            if idx >= 0:
+                self._speed_combo.setCurrentIndex(idx)
+
     # ------------------------------------------------------------ impl
     def _on_encoder_changed(self) -> None:
         enc: Encoder | None = self._encoder_combo.currentData()
