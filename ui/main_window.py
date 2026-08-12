@@ -592,6 +592,9 @@ class MainWindow(QMainWindow):
         self._subs_panel.changed.connect(self._on_subs_changed)
         self._subs_panel.transcribe_requested.connect(self._ctl.run_transcribe)
         self._subs_panel.clear_requested.connect(self._ctl.on_subs_cleared)
+        self._subs_panel.save_caption_edits_requested.connect(
+            self._ctl.save_caption_edits
+        )
         self._subtitle_choice = self._subs_panel.choice()
         lay.addWidget(self._subs_panel)
         return host
@@ -1017,6 +1020,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_subs_panel"):
             self._subs_panel.set_clip_loaded(True)
             self._subs_panel.set_srt_path(self._ctl.clip_subs.get(entry.id))
+            self._subs_panel.set_captions(self._ctl.clip_captions.get(entry.id, []))
         self._ctl.kick_scene_detection(info.path)
         if hasattr(self, "_overlays_panel"):
             self._overlays_panel.set_duration(info.duration)

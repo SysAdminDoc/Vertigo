@@ -11,13 +11,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QSignalBlocker, pyqtSignal
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
@@ -29,6 +33,13 @@ from core.animated_captions import (
     is_available as animated_is_available,
 )
 from core.caption_styles import PRESETS as CAPTION_PRESETS, default_preset as default_caption_preset
+from core.caption_editing import (
+    CaptionEditError,
+    merge_captions,
+    shift_captions,
+    split_captions,
+)
+from core.caption_types import Caption
 from core.subtitles import AVAILABLE_MODELS, DEFAULT_MODEL
 
 
@@ -65,12 +76,15 @@ class SubtitlesPanel(QWidget):
     transcribe_requested = pyqtSignal(str, object, str, bool)  # model, lang, preset_id, face_aware
     clear_requested = pyqtSignal()
     changed = pyqtSignal(object)                                # SubtitleChoice
+    save_caption_edits_requested = pyqtSignal(object)            # list[Caption]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._srt_path: Path | None = None
         self._running = False
         self._clip_loaded = False
+        self._captions: list[Caption] = []
+        self._review_dirty = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -179,6 +193,99 @@ class SubtitlesPanel(QWidget):
         self._progress.hide()
         root.addWidget(self._progress)
 
+        self._review_title = QLabel("Timing review")
+        self._review_title.setObjectName("formLabel")
+        root.addWidget(self._review_title)
+
+        self._review_list = QListWidget()
+        self._review_list.setObjectName("captionReviewList")
+        self._review_list.setAccessibleName("Caption timing review")
+        self._review_list.setToolTip(
+            "Select a caption chunk to preview its timing and make a small correction."
+        )
+        self._review_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self._review_list.setMinimumHeight(120)
+        self._review_list.setMaximumHeight(220)
+        self._review_list.itemSelectionChanged.connect(
+            self._on_review_selection_changed
+        )
+        root.addWidget(self._review_list)
+
+        review_spin_row = QHBoxLayout()
+        review_spin_row.setSpacing(8)
+        nudge_label = QLabel("Nudge")
+        nudge_label.setObjectName("formLabel")
+        review_spin_row.addWidget(nudge_label)
+        self._nudge_amount = QDoubleSpinBox()
+        self._nudge_amount.setObjectName("captionNudgeAmount")
+        self._nudge_amount.setAccessibleName("Caption nudge amount")
+        self._nudge_amount.setRange(-5.0, 5.0)
+        self._nudge_amount.setDecimals(2)
+        self._nudge_amount.setSingleStep(0.05)
+        self._nudge_amount.setValue(0.25)
+        self._nudge_amount.setSuffix(" s")
+        self._nudge_amount.setToolTip("Small timing offset applied to the selected chunk or all chunks")
+        review_spin_row.addWidget(self._nudge_amount)
+        split_label = QLabel("Split at")
+        split_label.setObjectName("formLabel")
+        review_spin_row.addWidget(split_label)
+        self._split_at = QDoubleSpinBox()
+        self._split_at.setObjectName("captionSplitPosition")
+        self._split_at.setAccessibleName("Caption split position")
+        self._split_at.setRange(0.0, 86400.0)
+        self._split_at.setDecimals(2)
+        self._split_at.setSingleStep(0.1)
+        self._split_at.setSuffix(" s")
+        self._split_at.setToolTip("Absolute timeline position used by Split selected")
+        review_spin_row.addWidget(self._split_at)
+        review_spin_row.addStretch(1)
+        root.addLayout(review_spin_row)
+
+        review_btn_row = QHBoxLayout()
+        review_btn_row.setSpacing(8)
+        self._nudge_selected_btn = QPushButton("Nudge selected")
+        self._nudge_selected_btn.setObjectName("ghostBtn")
+        self._nudge_selected_btn.setAccessibleName("Nudge selected caption")
+        self._nudge_selected_btn.setToolTip("Shift only the selected caption chunk")
+        self._nudge_selected_btn.clicked.connect(self.nudge_selected)
+        review_btn_row.addWidget(self._nudge_selected_btn)
+        self._nudge_all_btn = QPushButton("Nudge all")
+        self._nudge_all_btn.setObjectName("ghostBtn")
+        self._nudge_all_btn.setAccessibleName("Nudge all captions")
+        self._nudge_all_btn.setToolTip("Shift every caption chunk by the nudge amount")
+        self._nudge_all_btn.clicked.connect(self.nudge_all)
+        review_btn_row.addWidget(self._nudge_all_btn)
+        root.addLayout(review_btn_row)
+
+        review_edit_row = QHBoxLayout()
+        review_edit_row.setSpacing(8)
+        self._split_btn = QPushButton("Split selected")
+        self._split_btn.setObjectName("ghostBtn")
+        self._split_btn.setAccessibleName("Split selected caption")
+        self._split_btn.setToolTip("Split the selected chunk into two at the chosen position")
+        self._split_btn.clicked.connect(self.split_selected)
+        review_edit_row.addWidget(self._split_btn)
+        self._merge_btn = QPushButton("Merge with next")
+        self._merge_btn.setObjectName("ghostBtn")
+        self._merge_btn.setAccessibleName("Merge selected caption with next")
+        self._merge_btn.setToolTip("Join the selected chunk with the following chunk")
+        self._merge_btn.clicked.connect(self.merge_selected)
+        review_edit_row.addWidget(self._merge_btn)
+        self._save_review_btn = QPushButton("Save timing")
+        self._save_review_btn.setObjectName("primaryBtn")
+        self._save_review_btn.setAccessibleName("Save caption timing edits")
+        self._save_review_btn.setToolTip("Write the adjusted timing back to the caption sidecar")
+        self._save_review_btn.clicked.connect(self.save_caption_edits)
+        review_edit_row.addWidget(self._save_review_btn)
+        root.addLayout(review_edit_row)
+
+        self._review_status = QLabel("")
+        self._review_status.setObjectName("valueMuted")
+        self._review_status.setWordWrap(True)
+        root.addWidget(self._review_status)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         self._transcribe_btn = QPushButton("Generate captions")
@@ -233,9 +340,93 @@ class SubtitlesPanel(QWidget):
         self._srt_path = path
         if path is None:
             self._toggle.setChecked(False)
+            self._set_captions([], dirty=False)
         self._sync_controls()
         self._refresh_status()
         self.changed.emit(self._choice())
+
+    def set_captions(self, captions: list[Caption] | tuple[Caption, ...]) -> None:
+        """Show the transcript chunks returned by the worker."""
+
+        self._set_captions(list(captions), dirty=False)
+
+    def captions(self) -> list[Caption]:
+        """Return a copy of the currently reviewed transcript."""
+
+        return list(self._captions)
+
+    def preview_at(self, seconds: float) -> None:
+        """Select the chunk under the player playhead, if there is one."""
+
+        try:
+            position = float(seconds)
+        except (TypeError, ValueError):
+            return
+        for index, caption in enumerate(self._captions):
+            if caption.start <= position <= caption.end:
+                self._review_list.setCurrentRow(index)
+                item = self._review_list.currentItem()
+                if item is not None:
+                    self._review_list.scrollToItem(item)
+                return
+
+    def nudge_selected(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            self._set_review_status("Select a caption chunk first.", tone="warning")
+            return
+        self._apply_edit(
+            shift_captions(self._captions, self._nudge_amount.value(), indices=[index]),
+            index=index,
+        )
+
+    def nudge_all(self) -> None:
+        if not self._captions:
+            return
+        self._apply_edit(shift_captions(self._captions, self._nudge_amount.value()))
+
+    def split_selected(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            self._set_review_status("Select a caption chunk first.", tone="warning")
+            return
+        try:
+            edited = split_captions(self._captions, index, self._split_at.value())
+        except (CaptionEditError, IndexError) as exc:
+            self._set_review_status(str(exc), tone="warning")
+            return
+        self._apply_edit(edited, index=index)
+
+    def merge_selected(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            self._set_review_status("Select a caption chunk first.", tone="warning")
+            return
+        try:
+            edited = merge_captions(self._captions, index)
+        except IndexError as exc:
+            self._set_review_status(str(exc), tone="warning")
+            return
+        self._apply_edit(edited, index=min(index, len(edited) - 1))
+
+    def save_caption_edits(self) -> None:
+        if not self._review_dirty:
+            self._set_review_status("No unsaved timing changes.")
+            return
+        if self._srt_path is None:
+            self._set_review_status("Generate captions before saving timing edits.", tone="warning")
+            return
+        self.save_caption_edits_requested.emit(list(self._captions))
+
+    def mark_caption_edits_saved(self) -> None:
+        self._review_dirty = False
+        self._set_review_status("Timing edits saved to the caption sidecar.", tone="success")
+        self._sync_controls()
+
+    def mark_caption_edits_failed(self, message: str) -> None:
+        self._review_dirty = True
+        self._set_review_status(message, tone="warning")
+        self._sync_controls()
 
     def choice(self) -> SubtitleChoice:
         return self._choice()
@@ -309,6 +500,7 @@ class SubtitlesPanel(QWidget):
             self._toggle.setChecked(False)
             self._face_aware.setChecked(False)
         self._srt_path = None
+        self._set_captions([], dirty=False)
         self._progress.hide()
         self._sync_controls()
         self._refresh_status()
@@ -324,6 +516,30 @@ class SubtitlesPanel(QWidget):
         self._transcribe_btn.setEnabled(can_edit)
         self._clear_btn.setEnabled(self._clip_loaded and has_captions and not self._running)
         self._toggle.setEnabled(self._clip_loaded and has_captions and not self._running)
+        review_editable = can_edit and bool(self._captions)
+        self._review_title.setVisible(bool(self._captions))
+        self._review_list.setVisible(bool(self._captions))
+        self._nudge_amount.setVisible(bool(self._captions))
+        self._split_at.setVisible(bool(self._captions))
+        self._nudge_selected_btn.setVisible(bool(self._captions))
+        self._nudge_all_btn.setVisible(bool(self._captions))
+        self._split_btn.setVisible(bool(self._captions))
+        self._merge_btn.setVisible(bool(self._captions))
+        self._save_review_btn.setVisible(bool(self._captions))
+        self._review_status.setVisible(bool(self._captions) or bool(self._review_status.text()))
+        for control in (
+            self._review_list,
+            self._nudge_amount,
+            self._split_at,
+            self._nudge_selected_btn,
+            self._nudge_all_btn,
+            self._split_btn,
+            self._merge_btn,
+        ):
+            control.setEnabled(review_editable)
+        self._save_review_btn.setEnabled(
+            review_editable and self._review_dirty and has_captions
+        )
 
     def _refresh_status(self) -> None:
         if self._running:
@@ -355,3 +571,67 @@ class SubtitlesPanel(QWidget):
         self._status.setProperty("tone", tone)
         self._status.style().unpolish(self._status)
         self._status.style().polish(self._status)
+
+    # --------------------------------------------------------- review impl
+    def _set_captions(self, captions: list[Caption], *, dirty: bool) -> None:
+        self._captions = list(captions)
+        self._review_dirty = dirty
+        self._rebuild_review_list()
+        if not self._captions:
+            self._review_status.clear()
+        self._sync_controls()
+
+    def _apply_edit(self, captions: list[Caption], *, index: int | None = None) -> None:
+        self._set_captions(captions, dirty=True)
+        if self._captions:
+            selected = max(0, min(index if index is not None else 0, len(self._captions) - 1))
+            self._review_list.setCurrentRow(selected)
+        self._set_review_status(
+            "Unsaved timing changes. Save timing to update the export sidecar."
+        )
+
+    def _rebuild_review_list(self) -> None:
+        selected = self._selected_index()
+        with QSignalBlocker(self._review_list):
+            self._review_list.clear()
+            for index, caption in enumerate(self._captions):
+                item = QListWidgetItem(
+                    f"{index + 1:02d}  {_time_label(caption.start)} → "
+                    f"{_time_label(caption.end)}\n{caption.text}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, index)
+                item.setToolTip(
+                    f"{_time_label(caption.start)} → {_time_label(caption.end)}\n"
+                    f"{caption.text}"
+                )
+                self._review_list.addItem(item)
+            if self._captions:
+                row = max(0, min(selected if selected is not None else 0, len(self._captions) - 1))
+                self._review_list.setCurrentRow(row)
+        self._on_review_selection_changed()
+
+    def _selected_index(self) -> int | None:
+        row = self._review_list.currentRow()
+        return row if 0 <= row < len(self._captions) else None
+
+    def _on_review_selection_changed(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        caption = self._captions[index]
+        with QSignalBlocker(self._split_at):
+            self._split_at.setValue((caption.start + caption.end) / 2.0)
+
+    def _set_review_status(self, text: str, *, tone: str | None = None) -> None:
+        self._review_status.setText(text)
+        self._review_status.setProperty("tone", tone)
+        self._review_status.style().unpolish(self._review_status)
+        self._review_status.style().polish(self._review_status)
+        self._review_status.setVisible(bool(text))
+
+
+def _time_label(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    minutes = int(seconds // 60)
+    remainder = seconds - minutes * 60
+    return f"{minutes:02d}:{remainder:05.2f}"

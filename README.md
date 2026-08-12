@@ -38,6 +38,7 @@ From the Latin *vertere*, to turn. Turns raw footage of any shape into polished 
 - **Resumable batch exports** — each queue run writes a local atomic manifest with its recipe, per-clip status, final destination, and hidden partial path; a relaunch offers Resume or Discard without uploading project data anywhere.
 - **Optional integration readiness** — the Optional tools panel lists installed/missing packages, credential and license/terms state, and the local fallback for every opt-in capability. Hugging Face and Pexels credentials can be checked transiently without being stored.
 - **AI captions** — optional faster-whisper transcription (opt-in lazy install) with SRT burn-in. Word-wrapped, mobile-safe styling baked directly into the exported pixels.
+- **Caption timing review** — preview transcript chunks against the playhead, nudge a selected chunk or the full transcript, split / merge simple chunks, and save corrected SRT / ASS timing before export.
 - **Text overlays** — title cards, top straps, lower-thirds, and bottom captions. Per-overlay time range, color, and font size. Preset library for common Shorts/Reels motifs. All burned into the output via `drawtext=` filter chain.
 - **Live crop viewport** overlaid on the preview player so you see the target frame before rendering.
 - **Async FFmpeg encoding** with real-time progress bar and a scrolling log panel.
@@ -107,6 +108,7 @@ pytest.ini                pytest-qt binding pin (PyQt6)
 core/
   _lazy.py                shared pip-install helper with frozen-build guard + threading.Lock
   caption_types.py        Caption + Word dataclasses (lifted from subtitles for clean imports)
+  caption_editing.py      immutable timing nudge / split / merge operations + sidecar writer
   crashlog.py             persistent breadcrumb log — survives frozen-build stderr drop
   probe.py                ffprobe wrapper (VideoInfo dataclass)
   presets.py              platform output presets (Shorts/TikTok/Reels/Square)

@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Caption timing review.** The subtitles panel now follows the player
+  playhead, exposes a chunk list, supports small selected/all nudges, simple
+  split/merge edits, and atomically saves corrected SRT or ASS timing back to
+  the sidecar consumed by export. The immutable edit core and controller
+  persistence path are covered by unit and offscreen Qt tests.
 - **Optional integration readiness panel.** The new Optional tools surface
   inventories opt-in packages and PATH tools, shows credential and
   license/terms state, names the local fallback for each capability, and

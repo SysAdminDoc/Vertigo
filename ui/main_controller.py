@@ -63,6 +63,7 @@ from core.preflight import inspect_media_dependencies
 from core.probe import VideoInfo, probe
 from core.reframe import ReframeMode, build_plan
 from core.safe_zones import validate_safe_zones
+from core.caption_editing import write_edited_sidecar
 from core.subtitles import is_installed as subtitles_installed
 from workers import WORKER_CANCELLED_MSG
 from workers.detect_worker import DetectWorker
@@ -169,6 +170,7 @@ class MainController(QObject):
         w._cancel_btn.clicked.connect(self.cancel_active)
         w._player.canvas.viewport_dragged.connect(w._on_manual_drag)
         w._player.position_changed.connect(w._sync_track_pos)
+        w._player.position_changed.connect(w._subs_panel.preview_at)
         w._player.trim_changed.connect(w._on_trim_changed)
         w._player.tighten_btn.clicked.connect(self.run_tighten_silences)
         w._player.highlights_btn.clicked.connect(self.run_find_highlights)
@@ -367,9 +369,51 @@ class MainController(QObject):
         w._subs_panel.set_running(False)
         if w._current_entry and w._current_entry.id == entry_id:
             w._subs_panel.set_srt_path(srt)
+            w._subs_panel.set_captions(self.clip_captions.get(entry_id, []))
         w._toast.show_toast(f"Captions ready: {srt.name}", kind="success")
         w._refresh_overview()
         # Captions for a long clip unlock Suggest segments.
+        self.refresh_segments_button()
+
+    def save_caption_edits(self, captions: list) -> None:
+        """Persist the review panel's adjusted timings to the active sidecar."""
+
+        w = self.win
+        entry = w._current_entry
+        if entry is None:
+            return
+        path = self.clip_subs.get(entry.id)
+        if path is None:
+            w._subs_panel.mark_caption_edits_failed(
+                "Generate captions before saving timing edits."
+            )
+            return
+
+        from core.caption_styles import resolve as resolve_caption_preset
+
+        preset_id = getattr(w._subtitle_choice, "preset_id", "pop") or "pop"
+        if isinstance(preset_id, str) and preset_id.startswith("pycaps:"):
+            preset_id = "pop"
+        try:
+            output = write_edited_sidecar(
+                captions,
+                path,
+                preset=resolve_caption_preset(preset_id),
+                height_px=w._preset.height,
+                width_px=w._preset.width,
+            )
+        except Exception as exc:
+            message = f"Could not save caption timing: {type(exc).__name__}: {exc}"
+            w._subs_panel.mark_caption_edits_failed(message)
+            w._toast.show_toast(message, kind="error")
+            return
+
+        self.clip_subs[entry.id] = output
+        self._set_cached_captions(entry.id, list(captions))
+        w._subs_panel.set_captions(list(captions))
+        w._subs_panel.mark_caption_edits_saved()
+        w._toast.show_toast(f"Timing saved: {output.name}", kind="success")
+        w._refresh_overview()
         self.refresh_segments_button()
 
     def _on_subs_fail(self, msg: str) -> None:

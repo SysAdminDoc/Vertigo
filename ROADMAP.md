@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P1 - Add caption timing review and nudge tools
-  Why: faster-whisper supports word timestamps, but Whisper word timing is approximate around pauses; creators need a local way to correct visible caption drift before burn-in.
-  Evidence: faster-whisper README; Whisper word-timestamp discussion; OpenShorts subtitle-rendering issue; `core/subtitles.py`; `ui/subtitles_panel.py`.
-  Touches: `core/subtitles.py`, `core/caption_types.py`, `ui/subtitles_panel.py`, `ui/video_player.py`, `ui/main_controller.py`, `tests/`.
-  Acceptance: After transcription, users can preview caption chunks, shift selected/all captions by small offsets, split/merge simple chunks, save the adjusted sidecar, and export uses the adjusted timing.
-  Complexity: L
-
 - [ ] P2 - Add local multi-preset export matrix
   Why: Premiere Auto Reframe duplicates sequences for target ratios and commercial clippers produce variants per platform; Vertigo has presets but exports one active geometry at a time.
   Evidence: Adobe Auto Reframe docs; OpusClip API; Klap AI Reframe 2; `core/presets.py`; `ui/main_controller.py`.
