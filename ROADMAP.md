@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P1 - Add optional integration readiness panel
-  Why: `core.diarize` and `core.broll` are importable but hidden behind HF/Pexels/model prerequisites, while commercial tools make b-roll, speaker-aware edits, and captions obvious product surfaces.
-  Evidence: OpusClip API/features; Submagic b-roll; Vizard features; pyannote speaker-diarization model card; `core/diarize.py`; `core/broll.py`; existing ROADMAP T4b and b-roll partial items.
-  Touches: `ui/main_window.py`, `ui/main_controller.py`, `ui/subtitles_panel.py` or new non-markdown UI module, `core/diarize.py`, `core/broll.py`, `requirements-optional.txt`, `tests/`.
-  Acceptance: UI lists each optional integration with installed/missing/credential/license state, lets users validate HF_TOKEN and PEXELS_API_KEY without storing secrets, and routes users to existing local fallbacks when unavailable.
-  Complexity: M
-
 - [ ] P1 - Add caption timing review and nudge tools
   Why: faster-whisper supports word timestamps, but Whisper word timing is approximate around pauses; creators need a local way to correct visible caption drift before burn-in.
   Evidence: faster-whisper README; Whisper word-timestamp discussion; OpenShorts subtitle-rendering issue; `core/subtitles.py`; `ui/subtitles_panel.py`.

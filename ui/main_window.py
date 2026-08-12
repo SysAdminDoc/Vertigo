@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QDialog,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -36,6 +37,7 @@ from .file_drop import FileDropZone
 from .main_controller import MainController, _fmt_duration
 from .output_panel import OutputChoice, OutputPanel
 from .overlays_panel import OverlaysPanel
+from .integrations_panel import IntegrationReadinessPanel
 from .panels import add_overview_metric, build_tool_section
 from .subtitles_panel import SubtitleChoice, SubtitlesPanel
 from .theme import apply_app_theme, sanitize_theme_preference, theme_choices
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
         self._output_choice: OutputChoice | None = None
         self._subtitle_choice: SubtitleChoice | None = None
         self._overlays: list[TextOverlay] = []
+        self._integration_dialog: QDialog | None = None
 
         # Controller owns workers, analysis results, batch state,
         # last-output path, per-clip subtitle paths.
@@ -114,6 +117,26 @@ class MainWindow(QMainWindow):
             self.showNormal()
         else:
             self.showMaximized()
+
+    def _show_integrations(self) -> None:
+        if self._integration_dialog is None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Optional integrations")
+            dialog.setMinimumSize(760, 680)
+            dialog.resize(860, 760)
+            dialog.setModal(False)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(18, 18, 18, 18)
+            panel = IntegrationReadinessPanel(dialog)
+            layout.addWidget(panel)
+            self._integration_dialog = dialog
+        else:
+            panel = self._integration_dialog.findChild(IntegrationReadinessPanel)
+            if panel is not None:
+                panel.refresh()
+        self._integration_dialog.show()
+        self._integration_dialog.raise_()
+        self._integration_dialog.activateWindow()
 
     def _on_theme_changed(self, preference: str) -> None:
         self._apply_theme(preference, persist=True)
@@ -201,6 +224,15 @@ class MainWindow(QMainWindow):
         self._browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._browse_btn.setToolTip("Browse for one or more source clips")
         header.addWidget(self._browse_btn)
+        self._integrations_btn = QPushButton("Optional tools")
+        self._integrations_btn.setObjectName("ghostBtn")
+        self._integrations_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._integrations_btn.setToolTip(
+            "Review optional local integrations, prerequisites, fallbacks, and credential checks"
+        )
+        self._integrations_btn.setAccessibleName("Open optional integration readiness")
+        self._integrations_btn.clicked.connect(self._show_integrations)
+        header.addWidget(self._integrations_btn)
         self._hero_output_btn = QPushButton("Reveal export")
         self._hero_output_btn.setObjectName("ghostBtn")
         self._hero_output_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1135,5 +1167,9 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------- lifecycle
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._integration_dialog is not None:
+            panel = self._integration_dialog.findChild(IntegrationReadinessPanel)
+            if panel is not None:
+                panel.shutdown()
         self._ctl.shutdown(1500)
         super().closeEvent(event)

@@ -4,6 +4,12 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Optional integration readiness panel.** The new Optional tools surface
+  inventories opt-in packages and PATH tools, shows credential and
+  license/terms state, names the local fallback for each capability, and
+  validates Hugging Face/Pexels credentials with one bounded request. Entered
+  secrets are cleared after the check and never enter settings, manifests, or
+  logs.
 - **Resumable batch/export manifests.** Batch runs now persist their selected
   preset, mode, trim, output options, per-clip status, final paths, and hidden
   `.part` paths in an atomic local JSON ledger. Relaunch offers Resume or
