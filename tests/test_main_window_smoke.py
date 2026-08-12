@@ -61,6 +61,15 @@ class MainWindowSmokeTests(unittest.TestCase):
                 for pid in PRESETS:
                     win._choose_preset(pid)
 
+                # Safe-zone metadata follows the selected preset and the
+                # preview guide can be toggled without a loaded frame.
+                win._choose_preset("tiktok")
+                self.assertEqual(win._player.canvas._safe_zone.label, "TikTok safe zone")
+                win._player.set_safe_zones_visible(True)
+                self.assertTrue(win._player.canvas._safe_zones_visible)
+                win._player.set_safe_zones_visible(False)
+                self.assertFalse(win._player.canvas._safe_zones_visible)
+
                 # theme switch — must not raise for any palette
                 for theme_id in ("mocha", "graphite", "latte"):
                     win._apply_theme(theme_id, persist=False)

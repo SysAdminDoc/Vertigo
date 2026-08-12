@@ -28,6 +28,7 @@ from core.overlays import TextOverlay
 from core.presets import PRESETS, Preset, default_preset
 from core.probe import VideoInfo, probe
 from core.reframe import Adjustments, ReframeMode
+from core.safe_zones import validate_safe_zones
 
 from .adjustments_panel import AdjustmentsPanel
 from .batch_queue import BatchQueue, QueueEntry, QueueStatus
@@ -662,6 +663,8 @@ class MainWindow(QMainWindow):
 
     def _update_preset_ui(self) -> None:
         p = self._preset
+        if hasattr(self, "_player"):
+            self._player.set_safe_zone(p.safe_zone)
         duration = (
             f"Trims longer than {p.max_duration}s will need approval"
             if p.max_duration
@@ -684,23 +687,46 @@ class MainWindow(QMainWindow):
 
         duration = max(0.0, (self._trim_high or self._info.duration) - (self._trim_low or 0.0))
         limit = self._preset.max_duration
-        if limit and duration > limit:
-            self._platform_notice.setProperty("tone", "warning")
-            self._platform_notice.setText(
+        caption_preset = None
+        if self._subtitle_choice and self._subtitle_choice.burn_in:
+            from core.caption_styles import resolve as resolve_caption_preset
+
+            caption_preset = resolve_caption_preset(self._subtitle_choice.preset_id)
+        safe_report = validate_safe_zones(
+            self._preset,
+            overlays=self._overlays,
+            caption_preset=caption_preset,
+        )
+
+        notices: list[str] = []
+        over_limit = bool(limit and duration > limit)
+        if over_limit:
+            notices.append(
                 f"Trim is {_fmt_duration(duration)}, above the {self._preset.label} limit of {_fmt_duration(limit)}."
             )
-            self._platform_notice.show()
-            if hasattr(self, "_export_btn"):
-                self._export_btn.setToolTip("This trim exceeds the selected platform limit. You can still export.")
         elif limit:
             remaining = max(0.0, limit - duration)
-            self._platform_notice.setProperty("tone", "success")
-            self._platform_notice.setText(
+            notices.append(
                 f"Trim fits {self._preset.label}; {_fmt_duration(remaining)} of headroom remains."
             )
+        if safe_report.issues:
+            notices.append(f"Safe-zone check: {safe_report.summary()}")
+
+        if notices:
+            self._platform_notice.setProperty(
+                "tone", "warning" if over_limit or safe_report.issues else "success"
+            )
+            self._platform_notice.setText(" ".join(notices))
             self._platform_notice.show()
             if hasattr(self, "_export_btn"):
-                self._export_btn.setToolTip("Export the selected clip using the current preset and mode")
+                if safe_report.issues:
+                    self._export_btn.setToolTip(
+                        "Review the safe-zone warning before exporting; this export is still allowed."
+                    )
+                elif over_limit:
+                    self._export_btn.setToolTip(
+                        "This trim exceeds the selected platform limit. You can still export."
+                    )
         else:
             self._platform_notice.hide()
             if hasattr(self, "_export_btn"):
@@ -1085,10 +1111,12 @@ class MainWindow(QMainWindow):
 
     def _on_subs_changed(self, choice: SubtitleChoice) -> None:
         self._subtitle_choice = choice
+        self._refresh_platform_notice()
         self._refresh_overview()
 
     def _on_overlays_changed(self, overlays: list) -> None:
         self._overlays = overlays
+        self._refresh_platform_notice()
 
     # Worker lifecycle, batch driver, and per-worker signal handlers live
     # on self._ctl (ui/main_controller.py). Public API the window calls

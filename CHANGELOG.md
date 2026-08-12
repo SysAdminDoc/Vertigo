@@ -4,6 +4,11 @@ All notable changes to Vertigo are documented here.
 
 ## [Unreleased]
 
+- **Platform safe-zone guides.** Output presets now carry conservative
+  TikTok, Instagram Reels, YouTube Shorts, and square title-safe metadata.
+  The preview can show or hide the selected guide, and caption/overlay text
+  crossing it produces a visible export warning with regression coverage for
+  the 1080x1920 geometry.
 - **Media dependency security preflight.** Startup and export now report the
   active FFmpeg/Pillow versions, warn on stale recognized FFmpeg branches, and
   block exports when either FFmpeg cannot be verified or Pillow is below the

@@ -10,13 +10,6 @@ Actionable work only. Historical and completed roadmap material is archived in C
 - [ ] PyQt6 batch queue + trim timeline + colour grading + text overlay
   editor — all competitors are CLI or web.
 
-- [ ] P1 - Add platform safe-zone overlays and export validation
-  Why: TikTok, Meta Reels, and YouTube surfaces reserve UI overlay zones, while Vertigo lets captions/text overlays land without a platform-specific visibility check.
-  Evidence: TikTok safe-zone docs; Meta safe-zone docs; Google Ads YouTube safe-zone docs; `ui/video_player.py`; `ui/overlays_panel.py`; `ui/subtitles_panel.py`; `core/presets.py`.
-  Touches: `core/presets.py`, `ui/video_player.py`, `ui/overlays_panel.py`, `ui/subtitles_panel.py`, `ui/main_controller.py`, `tests/`.
-  Acceptance: Each preset exposes safe-zone metadata, preview can show/hide guides, captions/overlays warn when critical text enters unsafe regions, and tests pin guide geometry at 1080x1920.
-  Complexity: M
-
 - [ ] P1 - Persist resumable batch/export job manifests
   Why: OSS competitors show long-run failures around missing metadata and failed jobs, and Vertigo's queue/export state is currently in-memory during multi-clip work.
   Evidence: OpenShorts issue list; `ui/batch_queue.py`; `ui/main_controller.py`; `core/crashlog.py`.

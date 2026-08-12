@@ -54,6 +54,7 @@ from core.encode import EncodeJob
 from core.preflight import inspect_media_dependencies
 from core.probe import VideoInfo, probe
 from core.reframe import ReframeMode, build_plan
+from core.safe_zones import validate_safe_zones
 from core.subtitles import is_installed as subtitles_installed
 from workers import WORKER_CANCELLED_MSG
 from workers.detect_worker import DetectWorker
@@ -945,6 +946,22 @@ class MainController(QObject):
         if media_report.warnings:
             w._toast.show_toast(
                 f"Media security warning: {media_report.warnings[0]}",
+                kind="warning",
+                duration_ms=8000,
+            )
+        caption_preset = None
+        if w._subtitle_choice and w._subtitle_choice.burn_in:
+            from core.caption_styles import resolve as resolve_caption_preset
+
+            caption_preset = resolve_caption_preset(w._subtitle_choice.preset_id)
+        safe_report = validate_safe_zones(
+            w._preset,
+            overlays=w._overlays,
+            caption_preset=caption_preset,
+        )
+        if safe_report.issues:
+            w._toast.show_toast(
+                f"Safe-zone warning: {safe_report.summary()}",
                 kind="warning",
                 duration_ms=8000,
             )

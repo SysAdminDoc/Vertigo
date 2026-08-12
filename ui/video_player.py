@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QCheckBox,
     QSizePolicy,
     QSlider,
     QVBoxLayout,
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
 
 from .range_slider import RangeSlider
 from .theme import current_palette, qcolor
+from core.presets import SafeZone
 
 
 class PreviewCanvas(QWidget):
@@ -44,6 +46,8 @@ class PreviewCanvas(QWidget):
         self._mode = "center"
         self._track_x: float | None = None
         self._interactive = False
+        self._safe_zone: SafeZone | None = None
+        self._safe_zones_visible = False
 
     def set_aspect(self, w: int, h: int) -> None:
         self._aspect_w = w
@@ -64,6 +68,14 @@ class PreviewCanvas(QWidget):
 
     def set_track_x(self, x: float | None) -> None:
         self._track_x = x
+        self.update()
+
+    def set_safe_zone(self, safe_zone: SafeZone | None) -> None:
+        self._safe_zone = safe_zone
+        self.update()
+
+    def set_safe_zones_visible(self, visible: bool) -> None:
+        self._safe_zones_visible = bool(visible)
         self.update()
 
     def push_frame(self, frame: QVideoFrame) -> None:
@@ -193,6 +205,33 @@ class PreviewCanvas(QWidget):
         ]:
             p.drawLine(cx, cy, cx + cl * sx, cy)
             p.drawLine(cx, cy, cx, cy + cl * sy)
+
+        if self._safe_zones_visible and self._safe_zone is not None:
+            safe = self._safe_zone.rect(vp_w_px, vp_h_px)
+            safe_left = vp_x + safe.left
+            safe_top = vp_y + safe.top
+            safe_right = vp_x + safe.right
+            safe_bottom = vp_y + safe.bottom
+
+            unsafe_brush = QColor(theme.red)
+            unsafe_brush.setAlpha(38)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(unsafe_brush)
+            p.fillRect(vp_x, vp_y, vp_w_px, safe.top, unsafe_brush)
+            p.fillRect(vp_x, safe_bottom, vp_w_px, vp_y + vp_h_px - safe_bottom, unsafe_brush)
+            p.fillRect(vp_x, safe_top, safe.left, safe.height, unsafe_brush)
+            p.fillRect(safe_right, safe_top, vp_x + vp_w_px - safe_right, safe.height, unsafe_brush)
+
+            guide_pen = QPen(QColor(theme.yellow))
+            guide_pen.setStyle(Qt.PenStyle.DashLine)
+            guide_pen.setWidth(2)
+            p.setPen(guide_pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(safe_left, safe_top, safe.width, safe.height)
+
+            label_rect = QRectF(safe_left + 8, safe_top + 8, 150, 22)
+            p.setPen(QColor(theme.yellow))
+            p.drawText(label_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, "SAFE ZONE")
 
         if self._interactive:
             hint = "Drag to position crop"
@@ -440,6 +479,13 @@ class VideoPlayer(QWidget):
         self.segments_btn.setAccessibleName("Suggest candidate segments")
         self.segments_btn.setEnabled(False)
 
+        self.safe_zones_btn = QCheckBox("Safe zones")
+        self.safe_zones_btn.setAccessibleName("Toggle platform safe-zone guides")
+        self.safe_zones_btn.setToolTip(
+            "Show the selected platform's approximate UI-clearance guide in the preview."
+        )
+        self.safe_zones_btn.toggled.connect(self.canvas.set_safe_zones_visible)
+
         self.trim_silences_btn = QPushButton("Trim silences")
         self.trim_silences_btn.setObjectName("ghostBtn")
         self.trim_silences_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -474,6 +520,7 @@ class VideoPlayer(QWidget):
         trim_row.addWidget(self.highlights_btn)
         trim_row.addWidget(self.trim_silences_btn)
         trim_row.addWidget(self.tighten_btn)
+        trim_row.addWidget(self.safe_zones_btn)
 
         self._segment_settings = SegmentSettingsBar()
 
@@ -568,6 +615,16 @@ class VideoPlayer(QWidget):
 
     def set_aspect(self, w: int, h: int) -> None:
         self.canvas.set_aspect(w, h)
+
+    def set_safe_zone(self, safe_zone: SafeZone | None) -> None:
+        self.canvas.set_safe_zone(safe_zone)
+        if safe_zone is not None:
+            self.safe_zones_btn.setToolTip(
+                f"Show or hide the approximate {safe_zone.label.lower()} guide in the preview."
+            )
+
+    def set_safe_zones_visible(self, visible: bool) -> None:
+        self.safe_zones_btn.setChecked(bool(visible))
 
     def set_mode(self, mode: str) -> None:
         self.canvas.set_mode(mode)
